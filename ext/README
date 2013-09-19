@@ -1,2 +1,8 @@
-This directory is not under version control, so it makes a good place to
-put your own projects.
+This project is a part of the thesis work of Daniel Gyllstrom (dpg@cs.umass.edu).  This work falls under the POX project (https://github.com/noxrepo/pox) but all code here is not under POX version control.  
+
+We implement an algorithm, called PCount, that counts packets (on a per-flow basis) between any number of switches with the purpose of detecting packet loss at a fine-grained basis.  Between any measurement points (i.e., switches), PCount ensures that each switch considers exactly the same set of packets (excluding of course any packets lost in transmission).  Refer to Section 3.3.3 in the following document for more details regarding the PCount algorithm.
+
+https://dl.dropboxusercontent.com/u/27703050/thesis/proposal/final/thesis-proposal-dan-gyllstrom-submission.pdf
+
+Because PCount is effectively a controller (in the the OpenFlow sense), running PCount requires a network.  Instructions to run PCount using Mininet are forthcoming. 
+

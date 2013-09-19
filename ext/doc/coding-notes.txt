@@ -1,0 +1,35 @@
+This document contains a running list of limitations, hacks, and aspirations for refactoring.
+
+LIMITATIONS
+	
+	1. For a given flow, defined as (src_ip, dst_ips), our implementation assumes only pcount session takes place.  This means that only a single set of measurements can take place at a time.
+		-> This seems like a minor shortcoming because we can always count packet along switches corresponding to the flow
+	
+	2. Running an experiment is very manual.  It requires:
+		(a) emulating the correct topology w/in Mininnet, with the desired link loss probability, and correct remote IP address of the controller 
+		(b) starting the controller outside the VM 
+		(c) making sure that the pingall() run w/in Mininet is successful across all hosts so the flow tables are properly setup
+		(d) manually running the ping command to initiate the pcount session
+
+	3. Requires that the flow tables between all hosts that will be used in a PCount session are setup
+	
+	4. Multicast trees are hard-coded.
+
+HACKS
+
+	1. Hard-code the multicast trees:
+		- in _setup_mtree(), we should really use self.mcast_groups to determine which hosts are a part of the multicast group and tree
+  		- need a function that computes which hosts are downstream from a given switch, rather than hard coding this  
+
+	2. Rather than query the switches for their flow table state, I keep track of each switch's flow table at the controller.  This is clearly not scalable.
+
+
+REFACTORING WISH LIST
+
+	1. Consolidate the installation of flows from pcount.py and l3_arp_pcount.py to a single location.  There is lots of duplicate code.
+
+	2. Fix l3_arp_pcount_switch field "flow_measure_points".  
+		- Currently, it is dictory with structure: d_switch_id1 --> list w/ entries (d_switch_id2, d_switch_id3, .... , u_switch_id,nw_src,nw_dst). 
+		- It should be (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
+		- In doing so, this would require fixing several functions that access this dictionary structure
+

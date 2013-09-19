@@ -1,0 +1,2 @@
+#downstream-switch1,downstream-switch2, ..., upstream_switch,src,dest
+4,5,7,10.0.0.3,10.10.10.10

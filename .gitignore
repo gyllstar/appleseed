@@ -1,3 +1,5 @@
+doc/*
+*.pem
 *.pyc
 *.pyo
 *.py~
@@ -9,10 +11,13 @@ old.*
 *.diff
 *.orig
 *.swp
+*.pcap
 \#*\#
 *~
-ext/*
 pox/lib/pxpcap/pxpcap_c/build
 pox/lib/pxpcap/pxpcap_c/WpdPack
 pypy/
-tags
+ext/bak/
+ext/results/current/
+ext/topos/topology_generator-depracted.py
+
