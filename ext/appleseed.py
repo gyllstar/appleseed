@@ -45,6 +45,7 @@ log = core.getLogger("fault_tolerant_controller")
 from pox.lib.recoco import Timer
 import csv
 import os,sys
+from collections import defaultdict
 import utils
 from pox.lib.util import dpidToStr
 
@@ -66,6 +67,7 @@ import time
 # Timeout for ARP entries
 ARP_TIMEOUT = 6000 * 2
 
+INSTALL_PRIMARY_TREES_DELAY = 10  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
 
 
 packets_dropped_threshold = 5
@@ -96,6 +98,10 @@ class Entry (object):
     #return time.time() > self.timeout
 
 
+class AppleseedError(Exception):
+
+  def __init__(self, *args, **kwargs):
+    Exception.__init__(self, *args, **kwargs)
 
 
 
@@ -116,8 +122,13 @@ class fault_tolerant_controller (EventMixin):
     # For each switch, we map IP addresses to Entries
     self.arpTable = {}
 
+    self.ip_to_mac_map = {}   # maps IP address to Mac address.  9/23 PROBABLY CAN DELETE
+
     self.listenTo(core)
     self.listenTo(core.openflow_discovery)
+    
+    # Adjacency map.  [(upstream_switch,downstream_switch)] -> port from upstream_switch to downstream_switch
+    self.adjacency = defaultdict(lambda:None)
     
     # for each switch keep track of flow tables (switchId --> flow-table-entry), specifically (dpid --> ofp_flow_mod). 
     self.flowTables = {} 
@@ -125,10 +136,13 @@ class fault_tolerant_controller (EventMixin):
     # dict.  d_switch_id1 --> list w/ entries (d_switch_id2, d_switch_id3, .... , u_switch_id,nw_src,nw_dst)
     self.flow_measure_points={}  # note this really ought to be (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
     
+    # dictionary: (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
+    #self.tree_measure_points={} 
+    
     #multicast address -> [src,dest1,dest2,...]
     self.mcast_groups = {}
     
-    # (src-ip,dst-ip) -> [switch_id1, switch_id2, ...]
+    # (src-ip,dst-ip) -> [switch_id1, switch_id2, ...].  list of the most downstream switch_ids in the PCount session
     self.flow_strip_vlan_switch_ids = {}
     
     # (src-ip,dst-ip,switch_id) -> [dstream_host1,dstream_host2, ...] 
@@ -140,8 +154,7 @@ class fault_tolerant_controller (EventMixin):
     # multicast_dst_address -> list of tuples (u,d), representing a directed edge from u to d, that constitute all edges in the primary tree
     self.primary_trees = {}
     
-    utils.read_flow_measure_points_file(self)
-    utils.read_mtree_file(self)
+    self.trees_rename = [] #TODO rename to primary
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
     #       more than a single pair of measurement points
@@ -149,8 +162,10 @@ class fault_tolerant_controller (EventMixin):
     self.detect_total_pkt_dropped = 0
     self.actual_pkt_dropped_gt_threshold_time=-1
     self.detect_pkt_dropped_gt_threshold_time=-1
-    
     self.pkt_dropped_curr_sampling_window = 0
+    
+    utils.read_flow_measure_points_file(self)
+    utils.read_mtree_file(self)
     
     
     
@@ -196,12 +211,6 @@ class fault_tolerant_controller (EventMixin):
     """
     log.debug("s%i inport=%i IP %s => %s", dpid,inport,str(packet.next.srcip),str(packet.next.dstip))
     
-    #for link in Discovery.adjacency:
-    print core.openflow_discovery.adjacency
-    for link in core.openflow_discovery.adjacency:
-      print link
-      print "(n%s,n%s) = outport %s ||| (n%s,n%s) = outport %s " %(link.dpid1,link.dpid2,link.port1,link.dpid2,link.dpid1,link.port2) 
-
     # Learn or update port/MAC info for the SRC-IP (not dest!!)
     if packet.next.srcip in self.arpTable[dpid]:
       if self.arpTable[dpid][packet.next.srcip] != (inport, packet.src):
@@ -214,7 +223,7 @@ class fault_tolerant_controller (EventMixin):
     dstaddr = packet.next.dstip
     srcaddr = packet.next.srcip
     
-    
+    # TODO -- delete this if block
     if multicast.is_mcast_address(dstaddr,self):
       if dstaddr in multicast.installed_mtrees:
         # should never reach here because mcast tree is setup when switch closest to root receives a msg destined for a multicast address 
@@ -224,6 +233,8 @@ class fault_tolerant_controller (EventMixin):
       log.info("special handling IP Packet in for multicast address %s" %(str(dstaddr)))
       u_switch_id, d_switch_ids = multicast.setup_mtree(srcaddr,dstaddr,inport,self)
       
+      msg = "started PCOUNT at multicast special processsing with  u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids, srcaddr, dstaddr)
+      log.error(msg)
       pcount.start_pcount_thread(u_switch_id, d_switch_ids, srcaddr, dstaddr,self)
 
       
@@ -254,22 +265,60 @@ class fault_tolerant_controller (EventMixin):
         start_pcount,u_switch_id,d_switch_ids = pcount.check_start_pcount(dpid,match.nw_src,match.nw_dst,self)
         
         if start_pcount:
+          msg="started PCOUNT at normal processing with u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids,match.nw_src,match.nw_dst)
+          log.info(msg)
           pcount.start_pcount_thread(u_switch_id, d_switch_ids, match.nw_src, match.nw_dst,self)
     else:
       log.error("no ARP entry at switch s%s for dst=%s" %(dpid,dstaddr))
-        
-  
-  def blah_blah_handle_LinkEvent (self, event):
-
+       
+       
+  def _handle_LinkEvent (self, event):
+    """ Handles events thrown by pox.openflow.discovery to populate an adjacency matrix.  Starts timer for installing primary trees.
+    
+    pox.openflow.discovery uses LLDP packets to determine the network links and the port each link is connected to at the link's endpoints. 
+    The first call to this function starts a timer to install the primary trees after a 10 second delay.
+    """
+    self.try_mtree_install_and_pcount()
+    
     l = event.link
-    #print l[0],l[1],l[2],l[3]
+    
+    s1 = l.dpid1
+    s2 = l.dpid2
+    
+    # Mininet links are bidirectional
+    self.adjacency[(s1,s2)] = l.port1
+    self.adjacency[(s2,s1)] = l.port2
+    
+  def try_mtree_install_and_pcount(self):
+    """ If the adjacency matrix empty, thereby marking the start of topology discovery, install a primary tree with a 10 second delay.
+    """
+    if len(self.adjacency) == 0 and len(self.mcast_groups)>0:
+      log.debug("started timer to install primary trees in %i seconds." %(INSTALL_PRIMARY_TREES_DELAY))
+      core.callDelayed(INSTALL_PRIMARY_TREES_DELAY,multicast.install_primary_trees,self)
+    #elif len(self.adjacency) == 0:
+    #  print "code here to start PCOUNT?"
+    
+  def add_switch_to_host_edges(self,switch_id,host_ip_addr,port):
+    """ Add edges to adjacency list from switch_id to its directly connected host(s).
+    
+    Written such that each host can only be connected to a single switch.  
+    """
+    host_id = multicast.find_node_id(host_ip_addr)
+    
+    for key in self.adjacency.keys():
+      if key[1] == host_id:
+        return
+    
+    self.try_mtree_install_and_pcount()  
+    
+    self.adjacency[(switch_id,host_id)] = port
+    
+    # the code block below would allow for a host to be connected to multiple switches
+    #if (switch_id,host_id) not in self.adjacency.keys():
+    #  print "adding [(%s,%s)] = %s " %(switch_id,host_id,port)
+    #  self.adjacency[(switch_id,host_id)] = port
 
-            
-    ##### 9/17/13 DPG self-note for link discovery
-    for link in core.openflow_discovery.adjacency:
-      print link
-      print "(n%s,n%s) = outport %s ||| (n%s,n%s) = outport %s " %(link.dpid1,link.dpid2,link.port1,link.dpid2,link.dpid1,link.port2) 
-  
+    
   def _handle_arp_PacketIn(self,event,packet,dpid,inport):
     """ Learns the inport the switch receive packets from the given IP address
     
@@ -294,12 +343,12 @@ class fault_tolerant_controller (EventMixin):
             
             if a.protodst in multicast.installed_mtrees:
               print "already setup mcast tree for s%s, inport=%s,dest=%s, just resending the ARP reply and skipping mcast setup." %(dpid,inport,a.protodst)
-              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac, self.arpTable[dpid][a.protodst].port)
+              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             else:
               #getting the outport requires that we have run a "pingall" to setup the flow tables for the non-multicast addreses
               outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, multicast.h1)
               self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
-              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac, self.arpTable[dpid][a.protodst].port)
+              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             
             return
 
@@ -311,37 +360,17 @@ class fault_tolerant_controller (EventMixin):
             log.debug("%i %i learned %s", dpid,inport,str(a.protosrc))
             
           self.arpTable[dpid][a.protosrc] = Entry(inport, packet.src)
+         
 
           if a.opcode == arp.REQUEST:
-            # Maybe we can answer
-
+            #print "s%s protosrc=%s, protodst=%s" %(dpid,a.protosrc,a.protodst)
+            self.add_switch_to_host_edges(dpid,a.protosrc,inport)
+            
             if a.protodst in self.arpTable[dpid]:
-              # We have an answer...
-
-              if not self.arpTable[dpid][a.protodst].isExpired():
-                # .. and it's relatively current, so we'll reply ourselves
-                
-                r = arp()
-                r.hwtype = a.hwtype
-                r.prototype = a.prototype
-                r.hwlen = a.hwlen
-                r.protolen = a.protolen
-                r.opcode = arp.REPLY
-                r.hwdst = a.hwsrc
-                r.protodst = a.protosrc #IP address
-                r.protosrc = a.protodst #IP address
-                r.hwsrc = self.arpTable[dpid][a.protodst].mac
-                e = ethernet(type=packet.type, src=r.hwsrc, dst=a.hwsrc)
-                e.set_payload(r)   # r is the ARP REPLY
-                log.debug("%i %i answering ARP for %s" % (dpid, inport,
-                 str(r.protosrc)))
-                msg = of.ofp_packet_out()
-                msg.data = e.pack()
-                msg.actions.append(of.ofp_action_output(port = of.OFPP_IN_PORT))
-                msg.in_port = inport
-                event.connection.send(msg)
-                return
-
+              utils.send_arp_reply(packet,a,dpid,inport,self.arpTable[dpid][a.protodst].mac)
+              #self.add_switch_to_host_edges(dpid,a.protosrc,inport)
+              return
+    
     # Didn't know how to answer or otherwise handle this ARP request, so just flood it
     log.debug("%i %i flooding ARP %s %s => %s" % (dpid, inport,
      {arp.REQUEST:"request",arp.REPLY:"reply"}.get(a.opcode,
@@ -411,7 +440,17 @@ class fault_tolerant_controller (EventMixin):
       self._handle_flow_removed_msg(event,packet,dpid)
       
     return
+  
+  def _handle_core_ComponentRegistered (self, event):
+    if event.name == "host_tracker":
+      core.registerNew(core.topology)
+      event.component.addListenerByName("HostEvent",
+          self.__handle_host_tracker_HostEvent)
 
+  def __handle_host_tracker_HostEvent (self, event):
+    # Name is intentionally mangled to keep listen_to_dependencies away
+    h = str(event.entry.macaddr)
+    print "test"
 
 
   def handle_flow_stats (self,event):
@@ -426,6 +465,7 @@ class fault_tolerant_controller (EventMixin):
     
     core.openflow.addListenerByName("FlowStatsReceived", self.handle_flow_stats)
     log.debug("Listening to flow stats ...")
+    #core.openflow.addListenerByName("HostEvent", self.__handle_host_tracker_HostEvent)
     
     log.debug("configuration files -- measurement points file = %s, mtree file=%s" %(multicast.measure_pnts_file_str,multicast.mtree_file_str))
 

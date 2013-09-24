@@ -90,14 +90,15 @@ def read_mtree_file(controller):
       i+=1
     
     key = IPAddr(line_list[0])
+    controller.mcast_groups[key] = val_list
     
-    if controller.mcast_groups.has_key(key):
-      entry = controller.mcast_groups[key]
-      entry.append(val_list)
-    else:
-      entry = list()
-      entry.append(val_list)
-      controller.mcast_groups[key] = entry
+    #if controller.mcast_groups.has_key(key):
+    #  entry = controller.mcast_groups[key]
+    #  entry.append(val_list)
+    #else:
+    #  entry = list()
+    #  entry.append(val_list)
+    #  controller.mcast_groups[key] = entry
     
 def read_flow_measure_points_file(controller):
   """
@@ -155,7 +156,8 @@ def read_flow_measure_points_file(controller):
       controller.flow_measure_points[key] = entry
     
 
-def send_arp_reply(eth_packet,arp_packet,switch_id,inport,mcast_mac_addr,outport):
+
+def send_arp_reply(eth_packet,arp_packet,switch_id,inport,mac_addr):
   """ Create an ARP reply packet and send to the requesting switch"""
   r = arp()
   r.hwtype = arp_packet.hwtype
@@ -163,25 +165,24 @@ def send_arp_reply(eth_packet,arp_packet,switch_id,inport,mcast_mac_addr,outport
   r.hwlen = arp_packet.hwlen
   r.protolen = arp_packet.protolen
   r.opcode = arp.REPLY
-  
+
   r.protodst = arp_packet.protosrc
   r.protosrc = arp_packet.protodst
   r.hwdst = arp_packet.hwsrc  
-  r.hwsrc = mcast_mac_addr
-  
+  r.hwsrc = mac_addr
+
   e = ethernet(type=eth_packet.type, src=r.hwsrc, dst=arp_packet.hwsrc)
   e.set_payload(r)
   log.debug("%i %i answering ARP request from src=%s to dst=%s" % (switch_id,inport,str(r.protosrc),str(r.protodst)))
+  #print "%i %i answering ARP request from src=%s to dst=%s" % (switch_id,inport,str(r.protosrc),str(r.protodst))
+
   msg = of.ofp_packet_out()
   msg.data = e.pack()
   msg.actions.append(of.ofp_action_output(port = of.OFPP_IN_PORT))
   msg.in_port = inport
   
   send_msg_to_switch(msg, switch_id)
-  
-    
-      
-    
+
 def log_pcount_results(controller):
   
   file_base = multicast.measure_pnts_file_str.split(".")[0]
@@ -238,7 +239,7 @@ def record_pcount_value(vlan_id,nw_src,nw_dst,switch_id,packet_count,is_upstream
         result_list.append(diff)
         
         if controller.check_install_backup_trees(diff):
-          controller.install_backup_trees(diff)
+          controller.install_backup_trees()
         
         if not updatedTotalDrops:
           

@@ -45,6 +45,7 @@ def start_pcount_thread(u_switch_id, d_switch_ids, nw_src, nw_dst,controller):
   """
   pcounter = PCountSession()
   
+  # likely can make this more dynamic by finding the most downstream nodes along the measurement path to determine the strip_vlan_switch_ids
   strip_vlan_switch_ids = controller.flow_strip_vlan_switch_ids[(nw_src,nw_dst)]
   
   Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [u_switch_id, d_switch_ids,strip_vlan_switch_ids,controller.mtree_dstream_hosts,nw_src, nw_dst, controller.flowTables,controller.arpTable, PCOUNT_WINDOW_SIZE],recurring=True)
@@ -75,7 +76,45 @@ def check_start_pcount(d_switch_id,nw_src,nw_dst,controller):
     
   return False,-1,-1
 
+def get_tree_measure_points(nw_src,nw_dst,controller):
+  """ Checks if the given switch for flow (nw_src,nw_dst) is the downstream switch in which we want to trigger a PCount session
+  
+  Keyword Arguments:
+  d_switch_id -- downstream switch id
+  nw_src -- IP address of the source node, used to recognize the flow
+  nw_dst -- IP address of destination node, used to recognize the flow
+  
+  Returns
+  upstream_switch -- id of upstream tagging switch
+  downstream_switches -- list of node ids of downstream tagging switches
+  """
+  for d_switch_id in controller.flow_measure_points.keys():
+    for measure_pnt in controller.flow_measure_points[d_switch_id]:
+      last_indx = len(measure_pnt) -1
+      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
+        dstream_switches = list()
+        dstream_switches.append(d_switch_id)
+        dstream_switches = dstream_switches + measure_pnt[0:last_indx-2]
+        
+        return measure_pnt[last_indx-2],dstream_switches  #returns the upstream switch id 
+   
+  msg = "found no flow measurement points for flow = (%s,%s)" %(nw_src,nw_dst) 
+  raise appleseed.AppleseedError(msg)
 
+
+#  for measures in controller.flow_measure_points.values():
+#    for measure_pnt in measures:
+#      last_indx = len(measure_pnt) -1
+#      
+#      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
+#        dstream_switches = list()
+#        dstream_switches.append(d_switch_id)
+#        dstream_switches = dstream_switches + measure_pnt[0:last_indx-2]
+#        
+#        return measure_pnt[last_indx-2],dstream_switches  #returns the upstream switch id 
+#   
+#  msg = "found no flow measurement points for flow = (%s,%s)" %(nw_src,nw_dst) 
+#  raise appleseed.AppleseedError(msg)
 
 
 # TODO: refactor this mess by changing the structure of flow_measure_points to (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id) b/c no longer will need to search
