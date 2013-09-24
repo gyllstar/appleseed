@@ -231,7 +231,7 @@ class fault_tolerant_controller (EventMixin):
         return
       
       log.info("special handling IP Packet in for multicast address %s" %(str(dstaddr)))
-      u_switch_id, d_switch_ids = multicast.setup_mtree(srcaddr,dstaddr,inport,self)
+      u_switch_id, d_switch_ids = multicast.depracted_setup_mtree(srcaddr,dstaddr,inport,self)
       
       msg = "started PCOUNT at multicast special processsing with  u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids, srcaddr, dstaddr)
       log.error(msg)
@@ -441,17 +441,6 @@ class fault_tolerant_controller (EventMixin):
       
     return
   
-  def _handle_core_ComponentRegistered (self, event):
-    if event.name == "host_tracker":
-      core.registerNew(core.topology)
-      event.component.addListenerByName("HostEvent",
-          self.__handle_host_tracker_HostEvent)
-
-  def __handle_host_tracker_HostEvent (self, event):
-    # Name is intentionally mangled to keep listen_to_dependencies away
-    h = str(event.entry.macaddr)
-    print "test"
-
 
   def handle_flow_stats (self,event):
     """ Process a flow statistics query result from a given switch"""
@@ -465,7 +454,6 @@ class fault_tolerant_controller (EventMixin):
     
     core.openflow.addListenerByName("FlowStatsReceived", self.handle_flow_stats)
     log.debug("Listening to flow stats ...")
-    #core.openflow.addListenerByName("HostEvent", self.__handle_host_tracker_HostEvent)
     
     log.debug("configuration files -- measurement points file = %s, mtree file=%s" %(multicast.measure_pnts_file_str,multicast.mtree_file_str))
 

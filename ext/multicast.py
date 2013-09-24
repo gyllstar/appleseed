@@ -151,8 +151,12 @@ def install_basic_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,controller):
   utils.send_msg_to_switch(msg, switch_id)
   controller.cache_flow_table_entry(switch_id, msg)
   
-def setup_mtree(nw_src,nw_mcast_dst,inport,controller):
+def depracated_setup_mtree(nw_src,nw_mcast_dst,inport,controller):
   """ Hard-coded setup of mutlicast trees using the switch_id numbers. """
+  
+  msg = "depracted_setup_mtree() should not be called to install the primary trees.  Should be using mutlicast.compute_primary_trees()"
+  raise appleseed.AppleseedError(msg)
+  
   if nw_mcast_dst == mcast_ip_addr1:
     mtree1_switches = []
     primary_tree = []
@@ -164,7 +168,7 @@ def setup_mtree(nw_src,nw_mcast_dst,inport,controller):
       primary_tree = [(7,6),(6,4),(6,5)]
     
     controller.primary_trees[nw_mcast_dst] = primary_tree
-    return setup_mtree1_flow_tables(nw_src, nw_mcast_dst, inport,mtree1_switches,controller)
+    return depracated_setup_mtree1_flow_tables(nw_src, nw_mcast_dst, inport,mtree1_switches,controller)
   elif nw_mcast_dst == mcast_ip_addr2:
     mtree2_switches = []
     primary_tree = []
@@ -173,12 +177,12 @@ def setup_mtree(nw_src,nw_mcast_dst,inport,controller):
       primary_tree = [(15,14),(15,10)]
     
     controller.primary_trees[nw_mcast_dst] = primary_tree  #TODO REFACTOR !!!!!!!!!!!!!!!!!!!
-    return setup_mtree2_flow_tables(nw_src, nw_mcast_dst, inport,mtree2_switches,controller)
+    return depracated_setup_mtree2_flow_tables(nw_src, nw_mcast_dst, inport,mtree2_switches,controller)
   
 
 # should really use self.mcast_groups to determine which hosts are a part of the multicast group and tree
 # should have some way to determine which hosts are downstream from a given switch, rather than hard coding this  
-def setup_mtree1_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switches,controller):
+def depracated_setup_mtree1_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switches,controller):
   """ More hard-coding of the multicast trees.  Here we install the flow entries at each switch node """
   # mcast address = 10.10.10.10, src = 10.0.0.3, dst1=10.0.0.1, dst2 = 10.0.0.2
   # tree: 
@@ -226,7 +230,7 @@ def setup_mtree1_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switches,controlle
   
   return u_switch_id, d_switch_ids
 
-def setup_mtree2_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switches,controller):
+def depracated_setup_mtree2_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switches,controller):
   """ More hard-coding of the multicast trees.  Here we install the flow entries at each switch node """
       
   # mcast address = 11.11.11.11, src = 10.0.0.4, dst1=10.0.0.2, dst2 = 10.0.0.7, dst3 = 10.0.0.8, dst4 = 10.0.0.5, dst5 = 10.0.0.6
