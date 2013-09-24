@@ -36,12 +36,12 @@ mcast_mac_addr2 = EthAddr("11:11:11:11:11:11")
 #measure_pnts_file_str="measure-6s-2d-2p.csv"
 #measure_pnts_file_str="measure-4s-3d-1p.csv"
 #measure_pnts_file_str="measure-4s-2d-1p.csv"
-#measure_pnts_file_str="measure-4s-1p.csv"
+measure_pnts_file_str="measure-4s-1p.csv"
 #measure_pnts_file_str="measure-3s-2p.csv"
 #measure_pnts_file_str="measure-3s-1p.csv"
 #measure_pnts_file_str="measure-3s-2d-1p.csv"
 #measure_pnts_file_str="measure-2s-2p.csv"
-measure_pnts_file_str="measure-2s-1p.csv"
+#measure_pnts_file_str="measure-2s-1p.csv"
 
 mtree_file_str="mtree-4s-1t.csv"
 #mtree_file_str="mtree-6s-2t.csv"
@@ -350,7 +350,7 @@ def compute_primary_trees(controller):
 
 
 def install_primary_trees(controller):
-  """  Want this to take place after the adjacency matrix is populated."""
+  """  Install the already computed primary trees. Also triggers a pcount session after a 5 second delay (using a timer) """
   
   mcast_groups = generate_multicast_groups(controller)
   
@@ -360,9 +360,10 @@ def install_primary_trees(controller):
     tree.install()
     u_switch_id, d_switch_ids = pcount.get_tree_measure_points(tree.root_ip_address,tree.mcast_address,controller)
     core.callDelayed(pcount.PCOUNT_CALL_FREQUENCY,pcount.start_pcount_thread,u_switch_id, d_switch_ids,tree.root_ip_address,tree.mcast_address,controller)
-          # CALL PCOUNT HERE???
-  #start_pcount,u_switch_id,d_switch_ids = pcount.check_start_pcount(dpid,match.nw_src,match.nw_dst,self)
-  #pcount.start_pcount_thread(u_switch_id, d_switch_ids, match.nw_src, match.nw_dst,self)
+    
+  msg = " ================= Primary Trees Installed ================="
+  log.info(msg)
+  print "\t\t %s" %(msg)
   
   
 def find_node_id(ip_address):
@@ -387,7 +388,6 @@ class MulticastTree ():
     self.mcast_address = kwargs["mcast_address"]
     self.root_ip_address = kwargs["root"]
     self.terminal_ip_addresses = kwargs["terminals"]
-    self.node_levels = []  #list of lists, index 0 is for level 0 nodes, index 1 is for level 1 nodes, ...
     self.adjacency = kwargs["adjacency"]
     self.controller = kwargs["controller"]
     
@@ -406,41 +406,6 @@ class MulticastTree ():
         neighbors.append(edge[1])
     
     return neighbors
-    
-  def compute_node_levels(self):
-    """ Finds the level in the tree each node occupies.  Populates node_and_level_list"""
-    level = 0
-    id = find_node_id(self.root_ip_address)
-    upstream_ids = [id]
-    while len(upstream_ids)>0:
-      self.node_levels.append(upstream_ids)
-      downstream_ids = []
-      for id in upstream_ids:
-        downstream = self.find_downstream_neighbors(id)
-        downstream_ids = downstream_ids + downstream
-      level+=1
-      upstream_ids = downstream_ids
-    
-    
-  def sort_nodes_bottom_up(self,nodes_to_signal):
-    print "placeholder"
-    
-    
-class PrimaryTree (MulticastTree):
-  
-  def __init__(self, **kwargs):
-    MulticastTree.__init__(self, **kwargs)
-    self.backup_trees = {}  # (link) -> Tree
-  
-  def find_nodes_to_signal(self,failed_link):
-    """ Find the set of edges in the backup tree, for the given link, but not in the primary tree, and return the upstream node id of each edge"""
-    
-    backup_tree_edges = self.backup_trees[failed_link].edges
-    unique_edges =  [link for link in backup_tree_edges if link not in self.edges]
-    
-    upstream_nodes = [link[0] for link in unique_edges] 
-    
-    return upstream_nodes
   
   def install_leaf_flow(self,node_id):
     
@@ -451,7 +416,7 @@ class PrimaryTree (MulticastTree):
     for host in neighbors:
       ip_addr = self.find_ip_address(host)
       dst_addresses.append(ip_addr)
-      outport = self.adjacency[(node_id,host)]  # won't be in there until i figure out how to do the host discovery
+      outport = self.adjacency[(node_id,host)]  
       host_to_port_map[ip_addr] = outport
       
     # create and install a flow entry
@@ -467,27 +432,45 @@ class PrimaryTree (MulticastTree):
     
     install_basic_mcast_flow(node_id,self.root_ip_address,outports,self.mcast_address,self.controller)
     
+    
+class PrimaryTree (MulticastTree):
+  
+  def __init__(self, **kwargs):
+    MulticastTree.__init__(self, **kwargs)
+    self.backup_trees = {}  # (link) -> Tree
+    
+  def compute_node_levels(self):
+    """ Finds the level in the tree each node occupies.  Populates node_and_level_list"""
+    level = 0
+    id = find_node_id(self.root_ip_address)
+    upstream_ids = [id]
+    node_levels = [] 
+    while len(upstream_ids)>0:
+      node_levels.append(upstream_ids)
+      downstream_ids = []
+      for id in upstream_ids:
+        downstream = self.find_downstream_neighbors(id)
+        downstream_ids = downstream_ids + downstream
+      level+=1
+      upstream_ids = downstream_ids
+    return node_levels
+    
   def install(self):
     
     # (1) order nodes from top to bottom
-    self.compute_node_levels()
+    node_levels = self.compute_node_levels()
     
     # (2) install each flow entry (bottom-up) -- skip the root and leaf nodes because these are hosts and no flow entry is needed
-    leaf_level = len(self.node_levels)-2
+    leaf_level = len(node_levels)-2
     
     for level in range(leaf_level,0,-1):
       
-      for id in self.node_levels[level]:
+      for id in node_levels[level]:
         if level == leaf_level:
           self.install_leaf_flow(id)
         else:
           self.install_nonleaf_flow(id)
     
-    
-    
-    
-  
-  
   def __str__(self):
     
     return "%s-->%s" %(self.mcast_address,self.edges)
@@ -496,14 +479,36 @@ class PrimaryTree (MulticastTree):
     return self.__str__()
 
 
+class BackupTree (MulticastTree):
 
-
+  def __init__(self, **kwargs):
+    MulticastTree.__init__(self, **kwargs)
+    self.primary_tree = kwargs["primary_tree"]    # pointer to it's primary tree
+    self.backup_edge = kwargs["backup_edge"]      # the edge the tree is backup for
+    self.nodes_to_signal = []
+    self.compute_nodes_to_signal()
+    
+  def compute_nodes_to_signal(self):
+    """ Precompute the set of nodes we need to signal after a link failure. 
+    
+    Find the set of edges in the backup tree but not in the primary tree, and save the upstream node id of each edge
+    """
+    unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
+    upstream_nodes = [link[0] for link in unique_edges]
+    self.nodes_to_signal = upstream_nodes 
+    
+  def __str__(self):
+    unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
+    return "(%s,%s)--> unique-edges: %s" %(self.mcast_address,self.backup_edge,unique_edges)
+  
+  def __repr__(self):
+    return self.__str__()
 ###############################################################################################################################################################################
 
-class BackupTreeInstaller ():
+class Depracted_BackupTreeInstaller ():
   """ TODO document
   
-  Note: probably should be a singleton or don't need
+  Note: probably should be a singleton or don't need to wrap these functions into a class
   
   """
   
@@ -532,7 +537,7 @@ class BackupTreeInstaller ():
     
     print "placeholder"
   
-  def install_backup_trees(self,failed_link,controller):
+  def depracted_install_backup_trees(self,failed_link,controller):
     """ Reactive Algorithm: install backup trees bottom-up
     
     Keyword Arguments:
@@ -542,7 +547,7 @@ class BackupTreeInstaller ():
     self.controller = controller
     
     # (1) T <- find the primary trees using failed_link
-    affected_primary_trees = self._find_affected_trees(controller.primary_trees, failed_link)
+    affected_primary_trees = self.find_affected_trees(controller.primary_trees, failed_link)
     
     # (2) For each T: U <- the set of switches to signal
     for primary_tree in affected_primary_trees:
@@ -555,7 +560,7 @@ class BackupTreeInstaller ():
     
     # (3) Signal the switches 
 
-  def _find_affected_trees(self,primary_trees,failed_link):
+  def find_affected_trees(self,primary_trees,failed_link):
     """ Find and return a list of trees using the failed link 
     
     Keyword Arguments:

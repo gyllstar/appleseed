@@ -231,8 +231,8 @@ class fault_tolerant_controller (EventMixin):
         return
       
       log.info("special handling IP Packet in for multicast address %s" %(str(dstaddr)))
-      u_switch_id, d_switch_ids = multicast.depracted_setup_mtree(srcaddr,dstaddr,inport,self)
-      
+      u_switch_id, d_switch_ids = multicast.depracated_setup_mtree(srcaddr,dstaddr,inport,self)
+                                            
       msg = "started PCOUNT at multicast special processsing with  u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids, srcaddr, dstaddr)
       log.error(msg)
       pcount.start_pcount_thread(u_switch_id, d_switch_ids, srcaddr, dstaddr,self)
