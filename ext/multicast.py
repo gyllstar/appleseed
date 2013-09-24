@@ -306,6 +306,8 @@ def generate_multicast_groups(controller):
   return controller.mcast_groups
 
 def compute_primary_trees(controller):
+  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approxiation goes. """
+  
   
   num_switches = len(core.openflow_discovery._dps)
   
