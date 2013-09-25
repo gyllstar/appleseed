@@ -19,12 +19,51 @@ from argparse import ArgumentParser
 from mininet.util import dumpNodeConnections
 
 
+class H4S6( Topo ):
+    "Simple topology example."
+
+    def __init__(self,loss):
+      super(H4S6,self).__init__()  
+      self.loss = loss
+      self.generate()
+
+    def generate(self):
+      "Create custom topo."
+
+      # Add hosts and switches
+      h1 = self.addHost( 'h1' )
+      h2 = self.addHost( 'h2' )
+      h3 = self.addHost( 'h3' )
+      h4 = self.addHost( 'h4' )
+      s5 = self.addSwitch( 's5' )
+      s6 = self.addSwitch( 's6' )
+      s7 = self.addSwitch( 's7' )
+      s8 = self.addSwitch( 's8' )
+      s9 = self.addSwitch( 's9' )
+      s10 = self.addSwitch( 's10' )
+
+      # Add links
+
+      self.addLink( h1, s5)
+      self.addLink( s5, s9)
+      self.addLink( s5, s6)
+      self.addLink( s9, s7)
+      self.addLink( s9, s10)
+      self.addLink( s6, s7)
+      self.addLink( s6, s8)
+      self.addLink( s10, h4)
+      self.addLink( s10, h3)
+      self.addLink( s7, h2)
+      self.addLink( s8, h3)
+      self.addLink( s8, h4)
+
+
 class H9S6( Topo ):
     "Simple topology example."
 
     def __init__(self,loss):
-	super(H9S6,self).__init__()	
-	self.loss = loss
+	     super(H9S6,self).__init__()	
+	      self.loss = loss
         self.generate()
 
     def generate(self):
@@ -74,7 +113,7 @@ class H3S4( Topo ):
         # Initialize topology
         Topo.__init__( self )
 	
-	self.loss = loss
+	     self.loss = loss
 
         # Add hosts and switches
         leftHost = self.addHost( 'h1' )
@@ -109,7 +148,7 @@ class H2S2( Topo ):
 
     def __init__( self,loss):
         "Create custom topo."
-	self.loss = loss
+	       self.loss = loss
 
         # Initialize topology
         Topo.__init__( self )
