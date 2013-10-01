@@ -474,7 +474,7 @@ class MulticastTree ():
       host_to_port_map[ip_addr] = outport
       
     # create and install a flow entry
-    print "called install_rewrite_dst_mcast_flow(s%s,root=%s,host_prt_map=%s,mcast_addr=%s,dst_addr=%s) " %(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses)
+    #print "called install_rewrite_dst_mcast_flow(s%s,root=%s,host_prt_map=%s,mcast_addr=%s,dst_addr=%s) " %(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses)
     install_rewrite_dst_mcast_flow(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses, self.controller)
     
   def determine_flow_priority(self,node_id):
@@ -510,7 +510,7 @@ class MulticastTree ():
     if set_priority_flag:
       priority = self.determine_flow_priority(node_id)
       
-    print "called install_basic_mcast_flow(s%s,root=%s,outport=%s,mcast_addr=%s,priority=%s)" %(node_id,self.root_ip_address,outports,self.mcast_address,priority)
+    #print "called install_basic_mcast_flow(s%s,root=%s,outport=%s,mcast_addr=%s,priority=%s)" %(node_id,self.root_ip_address,outports,self.mcast_address,priority)
     install_basic_mcast_flow(node_id,self.root_ip_address,outports,self.mcast_address,priority,self.controller)
     
   def compute_node_levels(self):
@@ -528,7 +528,20 @@ class MulticastTree ():
       level+=1
       upstream_ids = downstream_ids
     return node_levels
+  
+  def is_leaf_node(self,node_id):
+    """ Return True if the node_id is a leaf node.  We consider a leaf node one directly connected with a end-host. """
+    neighbors = self.find_downstream_neighbors(node_id)
     
+    for id in neighbors:
+      if self.find_ip_address(id) in self.terminal_ip_addresses:
+        return True
+    return False 
+  
+  def is_host(self,node_id):
+    if self.find_ip_address(node_id) in self.terminal_ip_addresses:
+      return True   
+    return False
     
 class PrimaryTree (MulticastTree):
   
@@ -551,9 +564,10 @@ class PrimaryTree (MulticastTree):
     leaf_level = len(node_levels)-2
     
     for level in range(leaf_level,0,-1):
-      
       for id in node_levels[level]:
-        if level == leaf_level:
+        if self.is_host(id): 
+          continue
+        if self.is_leaf_node(id):
           self.install_leaf_flow(id)
         else:
           self.install_nonleaf_flow(id)
@@ -622,7 +636,7 @@ class BackupTree (MulticastTree):
     
     TODO: For Proactive, signal the most upstream node
     """
-    print "made it to BackupTree.activate()!!!!"
+   
     if self.controller.backup_tree_mode == Backup_Mode.REACTIVE:
       self.reactive_install()
     elif self.controller.backup_tree_mode == Backup_Mode.PROACIVE:
@@ -630,14 +644,11 @@ class BackupTree (MulticastTree):
       log.error(msg)
       raise applseed.AppleseedError(msg)
     
-  def is_leaf_node(self,node_id):
-    """ Return True if the node_id is a leaf node.  We consider a leaf node one directly connected with a end-host. """
-    neighbors = self.find_downstream_neighbors(node_id)
+    msg = "============== Backup Tree Activated =============="
+    log.info(msg)
+    print msg
     
-    for id in neighbors:
-      if self.find_ip_address(id) in self.terminal_ip_addresses:
-        return True
-    return False
+
     
   def __str__(self):
     unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]

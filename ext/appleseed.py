@@ -182,8 +182,8 @@ class fault_tolerant_controller (EventMixin):
     return pkt_loss_cnt > packets_dropped_threshold
          
   def activate_backup_trees(self,failed_link):
-    print failed_link
-    print "attempting to activate backup tree for (%s,%s)" %(failed_link[0],failed_link[1])
+    #print failed_link
+    #print "attempting to activate backup tree for (%s,%s)" %(failed_link[0],failed_link[1])
     for tree in multicast.find_affected_primary_trees(self.primary_trees,failed_link):
       print tree,tree.backup_trees
       for backup in tree.backup_trees:
