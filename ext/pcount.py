@@ -48,7 +48,8 @@ def start_pcount_thread(u_switch_id, d_switch_ids, nw_src, nw_dst,controller):
   # likely can make this more dynamic by finding the most downstream nodes along the measurement path to determine the strip_vlan_switch_ids
   strip_vlan_switch_ids = controller.flow_strip_vlan_switch_ids[(nw_src,nw_dst)]
   
-  Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [u_switch_id, d_switch_ids,strip_vlan_switch_ids,controller.mtree_dstream_hosts,nw_src, nw_dst, controller.flowTables,controller.arpTable, PCOUNT_WINDOW_SIZE],recurring=True)
+  Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [u_switch_id, d_switch_ids,strip_vlan_switch_ids,controller.depracated_mtree_dstream_hosts,nw_src, 
+                                                               nw_dst, controller.flowTables,controller.arpTable, PCOUNT_WINDOW_SIZE,controller],recurring=True,selfStoppable=True)
 
   
 def check_start_pcount(d_switch_id,nw_src,nw_dst,controller):
@@ -101,20 +102,6 @@ def get_tree_measure_points(nw_src,nw_dst,controller):
   msg = "found no flow measurement points for flow = (%s,%s)" %(nw_src,nw_dst) 
   raise appleseed.AppleseedError(msg)
 
-
-#  for measures in controller.flow_measure_points.values():
-#    for measure_pnt in measures:
-#      last_indx = len(measure_pnt) -1
-#      
-#      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-#        dstream_switches = list()
-#        dstream_switches.append(d_switch_id)
-#        dstream_switches = dstream_switches + measure_pnt[0:last_indx-2]
-#        
-#        return measure_pnt[last_indx-2],dstream_switches  #returns the upstream switch id 
-#   
-#  msg = "found no flow measurement points for flow = (%s,%s)" %(nw_src,nw_dst) 
-#  raise appleseed.AppleseedError(msg)
 
 
 # TODO: refactor this mess by changing the structure of flow_measure_points to (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id) b/c no longer will need to search
@@ -237,7 +224,7 @@ class PCountSession (EventMixin):
  
  
     
-  def pcount_session(self,u_switch_id,d_switch_ids,strip_vlan_switch_ids,mtree_dstream_hosts,nw_src, nw_dst,flow_tables,arpTable,window_size):
+  def pcount_session(self,u_switch_id,d_switch_ids,strip_vlan_switch_ids,mtree_dstream_hosts,nw_src, nw_dst,flow_tables,arpTable,window_size,controller):
     """
     Entry point to running a PCount session. Measure the packet loss for flow, f, between the upstream switch and  and downstream switches, for a specified window of time
     
@@ -245,7 +232,7 @@ class PCountSession (EventMixin):
     u_switch_id --  the id of the upstream switch, 
     d_switch_ids -- list of ids of the downstream switches
     strip_vlan_switch_ids -- the ids of nodes that should remove the VLAN tag from matched packets
-    mtree_dstream_hosts -- the downstream hosts in teh multicast tree
+    depracated_mtree_dstream_hosts -- the downstream hosts in teh multicast tree
     nw_src -- IP address of the source host (used to identify the flow to run the pcount session over)
     nw_dst -- IP address of the destination host, possibly a multicast address) (used to identify the flow to run the pcount sesssion over)
     flow_tables -- list of all flow tables, copied from fault_tolerant_controller
@@ -253,6 +240,9 @@ class PCountSession (EventMixin):
     window_size -- window is the length (in seconds) of the sampling window
     
     """
+    if controller.turn_pcount_off: 
+      return False
+    
     global global_vlan_id
     global_vlan_id+=1
     self.flowTables = flow_tables
@@ -511,8 +501,6 @@ class PCountSession (EventMixin):
     """
   # (1): create a copy of the flow entry, e, at switch u.  call this copy e'. 
 
-    # highest possible value for flow table entry is 2^(16) -1
-    #flow_priority= 2**16 - 1 - vlan_id #subtract vlan_id to make sure that the priority number is unique
     flow_priority = self.current_highest_priority_flow_num
     
     #prt = self._find_nonvlan_flow_outport(u_switch_id, nw_src, nw_dst)

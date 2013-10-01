@@ -36,36 +36,26 @@ rather we identify switches by their switch_id and use the flow tables to determ
 """
 
 from pox.core import core
-from pox.openflow.discovery import Discovery
 import pcount
 import multicast
-import pox
 log = core.getLogger("fault_tolerant_controller")
 #log = core.getLogger()
-from pox.lib.recoco import Timer
-import csv
-import os,sys
 from collections import defaultdict
 import utils
-from pox.lib.util import dpidToStr
 
 from pox.lib.packet.ethernet import ethernet
 from pox.lib.packet.ipv4 import ipv4
 from pox.lib.packet.arp import arp
-from pox.lib.packet.dhcp import dhcp
-from pox.lib.addresses import IPAddr,EthAddr
+from pox.lib.addresses import IPAddr
 
 import pox.openflow.libopenflow_01 as of
 
-from pox.lib.revent import *
+from pox.lib.revent import EventMixin
 
 import time
 
 
 
-
-# Timeout for ARP entries
-ARP_TIMEOUT = 6000 * 2
 
 INSTALL_PRIMARY_TREES_DELAY = 10  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
 
@@ -77,11 +67,8 @@ class Entry (object):
   Not strictly an ARP entry.
   We use the port to determine which port to forward traffic out of.
   We use the MAC to answer ARP replies.
-  We use the timeout so that if an entry is older than ARP_TIMEOUT, we
-   flood the ARP request rather than try to answer it ourselves.
   """
   def __init__ (self, port, mac):
-    self.timeout = time.time() + ARP_TIMEOUT
     self.port = port    #DPG: this could be a list of ports because we support Layer 3 multicast
     self.mac = mac
 
@@ -95,7 +82,6 @@ class Entry (object):
 
   def isExpired (self):
     return False #DPG: modified this because for our application (power grid) the IP addresses will not change and therefore will not expire
-    #return time.time() > self.timeout
 
 
 class AppleseedError(Exception):
@@ -146,15 +132,18 @@ class fault_tolerant_controller (EventMixin):
     self.flow_strip_vlan_switch_ids = {}
     
     # (src-ip,dst-ip,switch_id) -> [dstream_host1,dstream_host2, ...] 
-    self.mtree_dstream_hosts = {}
+    self.depracated_mtree_dstream_hosts = {}
     
     # vlan_id -> [nw_src,nw_dst, u_switch_id,u_count,d_switch_id,d_count,u_count-dcount]
     self.pcount_results = dict()
     
     # multicast_dst_address -> list of tuples (u,d), representing a directed edge from u to d, that constitute all edges in the primary tree
-    self.primary_trees = {}
+    self.depracted_primary_trees = {}
     
-    self.trees_rename = [] #TODO rename to primary
+    self.primary_trees = [] #TODO rename to primary
+    
+    self.backup_tree_mode = multicast.Backup_Mode.REACTIVE
+  
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
     #       more than a single pair of measurement points
@@ -163,10 +152,12 @@ class fault_tolerant_controller (EventMixin):
     self.actual_pkt_dropped_gt_threshold_time=-1
     self.detect_pkt_dropped_gt_threshold_time=-1
     self.pkt_dropped_curr_sampling_window = 0
+    self.turn_pcount_off = False
     
     utils.read_flow_measure_points_file(self)
     utils.read_mtree_file(self)
     
+   
     
     
   def cache_flow_table_entry(self,dpid,flow_entry):
@@ -185,14 +176,20 @@ class fault_tolerant_controller (EventMixin):
       self.flowTables[dpid].append(flow_entry)
 
 
-  def check_install_backup_trees(self,pkt_loss_cnt):
+  def check_install_backup_trees(self,monitored_link,pkt_loss_cnt):
     """ Checks if the pkt_loss_cnt exceeds a threshold""" 
     
     return pkt_loss_cnt > packets_dropped_threshold
          
-  def install_backup_trees(self):
+  def activate_backup_trees(self,failed_link):
+    print failed_link
+    print "attempting to activate backup tree for (%s,%s)" %(failed_link[0],failed_link[1])
+    for tree in multicast.find_affected_primary_trees(self.primary_trees,failed_link):
+      print tree,tree.backup_trees
+      for backup in tree.backup_trees:
+        if backup.backup_edge == failed_link:
+          backup.activate()
     
-    print "placeholder for installing backup trees"
    
   
   def _handle_ipv4_PacketIn(self,event,packet,dpid,inport):
@@ -224,11 +221,11 @@ class fault_tolerant_controller (EventMixin):
     srcaddr = packet.next.srcip
     
     # TODO -- delete this if block
-    if multicast.is_mcast_address(dstaddr,self):
-      if dstaddr in multicast.installed_mtrees:
+    if multicast.is_mcast_address(dstaddr,self) and self.is_mcast_tree_installed(dstaddr):
+      #if dstaddr in multicast.installed_mtrees:
         # should never reach here because mcast tree is setup when switch closest to root receives a msg destined for a multicast address 
-        print "already setup mcast tree for s%s, inport=%s,dest=%s." %(dpid,inport,dstaddr)
-        return
+      print "already setup mcast tree for s%s, inport=%s,dest=%s." %(dpid,inport,dstaddr)
+      return
       
       log.info("special handling IP Packet in for multicast address %s" %(str(dstaddr)))
       u_switch_id, d_switch_ids = multicast.depracated_setup_mtree(srcaddr,dstaddr,inport,self)
@@ -285,6 +282,12 @@ class fault_tolerant_controller (EventMixin):
     s1 = l.dpid1
     s2 = l.dpid2
     
+    link_event = "discovered"
+    if not event.added: 
+      link_event = "removed"
+    msg = "%s (s%s,s%s)" %(link_event,s1,s2)
+    log.info(msg)
+    
     # Mininet links are bidirectional
     self.adjacency[(s1,s2)] = l.port1
     self.adjacency[(s2,s1)] = l.port2
@@ -294,7 +297,7 @@ class fault_tolerant_controller (EventMixin):
     """
     if len(self.adjacency) == 0 and len(self.mcast_groups)>0:
       log.debug("started timer to install primary trees in %i seconds." %(INSTALL_PRIMARY_TREES_DELAY))
-      core.callDelayed(INSTALL_PRIMARY_TREES_DELAY,multicast.install_primary_trees,self)
+      core.callDelayed(INSTALL_PRIMARY_TREES_DELAY,multicast.install_all_trees,self)
     #elif len(self.adjacency) == 0:
     #  print "code here to start PCOUNT?"
     
@@ -311,6 +314,8 @@ class fault_tolerant_controller (EventMixin):
     
     self.try_mtree_install_and_pcount()  
     
+    log.info("discovered (s%s,h%s)=%s" %(switch_id,host_id,port))
+    
     self.adjacency[(switch_id,host_id)] = port
     
     # the code block below would allow for a host to be connected to multiple switches
@@ -318,6 +323,13 @@ class fault_tolerant_controller (EventMixin):
     #  print "adding [(%s,%s)] = %s " %(switch_id,host_id,port)
     #  self.adjacency[(switch_id,host_id)] = port
 
+  def is_mcast_tree_installed(self,mcast_addr):
+    
+    for tree in self.primary_trees:
+      if tree.mcast_address == mcast_addr:
+        return True
+      
+    return False
     
   def _handle_arp_PacketIn(self,event,packet,dpid,inport):
     """ Learns the inport the switch receive packets from the given IP address
@@ -341,9 +353,10 @@ class fault_tolerant_controller (EventMixin):
           if multicast.is_mcast_address(a.protodst,self):
             log.debug("skipping normal ARP Request code because ARP request is for multicast address %s" %(str(a.protodst)))
             
-            if a.protodst in multicast.installed_mtrees:
+            #if a.protodst in multicast.installed_mtrees:
+            if self.is_mcast_tree_installed(a.protodst):
               print "already setup mcast tree for s%s, inport=%s,dest=%s, just resending the ARP reply and skipping mcast setup." %(dpid,inport,a.protodst)
-              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
+             # utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             else:
               #getting the outport requires that we have run a "pingall" to setup the flow tables for the non-multicast addreses
               outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, multicast.h1)
@@ -370,6 +383,9 @@ class fault_tolerant_controller (EventMixin):
               utils.send_arp_reply(packet,a,dpid,inport,self.arpTable[dpid][a.protodst].mac)
               #self.add_switch_to_host_edges(dpid,a.protosrc,inport)
               return
+    
+    if len(self.primary_trees) == 0:
+      return #no-op so we avoid ping-poinging ARP requests for the intitial pings
     
     # Didn't know how to answer or otherwise handle this ARP request, so just flood it
     log.debug("%i %i flooding ARP %s %s => %s" % (dpid, inport,

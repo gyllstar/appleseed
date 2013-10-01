@@ -14,6 +14,7 @@ from pox.lib.addresses import IPAddr,EthAddr
 import pox.openflow.libopenflow_01 as of
 from pox.lib.packet.ethernet import ethernet
 from pox.core import core
+from types import NoneType
 log = core.getLogger("multicast")
 
 
@@ -33,22 +34,30 @@ mcast_mac_addr = EthAddr("10:10:10:10:10:10")
 mcast_ip_addr2 = IPAddr("10.11.11.11")
 mcast_mac_addr2 = EthAddr("11:11:11:11:11:11")
 
-#measure_pnts_file_str="measure-6s-2d-2p.csv"
-#measure_pnts_file_str="measure-4s-3d-1p.csv"
-#measure_pnts_file_str="measure-4s-2d-1p.csv"
-measure_pnts_file_str="measure-4s-1p.csv"
-#measure_pnts_file_str="measure-3s-2p.csv"
-#measure_pnts_file_str="measure-3s-1p.csv"
-#measure_pnts_file_str="measure-3s-2d-1p.csv"
-#measure_pnts_file_str="measure-2s-2p.csv"
-#measure_pnts_file_str="measure-2s-1p.csv"
+#measure_pnts_file_str="measure-h9s6-2d-2p.csv"
+measure_pnts_file_str ="measure-h4s8-1d-1p.csv"
+#measure_pnts_file_str="measure-h3s4-3d-1p.csv"
+#measure_pnts_file_str="measure-h3s4-2d-1p.csv"
+#measure_pnts_file_str="measure-h3s4-1p.csv"
+#measure_pnts_file_str="measure-h3s3-2p.csv"
+#measure_pnts_file_str="measure-h3s3-1p.csv"
+#measure_pnts_file_str="measure-h3s3-2d-1p.csv"
+#measure_pnts_file_str="measure-h3s2-2p.csv"
+#measure_pnts_file_str="measure-h3s2-1p.csv"
 
-mtree_file_str="mtree-4s-1t.csv"
-#mtree_file_str="mtree-6s-2t.csv"
+mtree_file_str="mtree-h4s8-1t.csv"
+#mtree_file_str="mtree-h3s4-1t.csv"
+#mtree_file_str="mtree-h9s6-2t.csv"
 #################### End of Hard-coded IP addresses and config files ####################
 
 
-installed_mtrees=[] #list of multicast addresses with an mtree already installed
+depracted_installed_mtrees=[] #list of multicast addresses with an mtree already installed
+
+def enum(**enums):
+    return type('Enum', (), enums)
+  
+Backup_Mode = enum(REACTIVE=1,PROACTIVE=2,MERGER=3)
+
 
 def is_mcast_address(dst_ip_address,controller):
   return controller.mcast_groups.has_key(dst_ip_address)
@@ -139,15 +148,17 @@ def install_rewrite_dst_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,new_dst,c
   utils.send_msg_to_switch(msg, switch_id)
   controller.cache_flow_table_entry(switch_id, msg)
   
-def install_basic_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,controller):
+def install_basic_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,priority,controller):
   """ Install a flow table rule using the multicast destination address and list of outports  """
-
   msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
   msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=nw_src, nw_dst = nw_mcast_dst)
   
   for prt in ports:
     msg.actions.append(of.ofp_action_output(port = prt))
   
+  if priority > 0:  # if the priority is negative we just take the default value
+    msg.priority = priority
+    
   utils.send_msg_to_switch(msg, switch_id)
   controller.cache_flow_table_entry(switch_id, msg)
   
@@ -167,7 +178,7 @@ def depracated_setup_mtree(nw_src,nw_mcast_dst,inport,controller):
       mtree1_switches = [7,6,5,4]
       primary_tree = [(7,6),(6,4),(6,5)]
     
-    controller.primary_trees[nw_mcast_dst] = primary_tree
+    controller.depracted_primary_trees[nw_mcast_dst] = primary_tree
     return depracated_setup_mtree1_flow_tables(nw_src, nw_mcast_dst, inport,mtree1_switches,controller)
   elif nw_mcast_dst == mcast_ip_addr2:
     mtree2_switches = []
@@ -176,7 +187,7 @@ def depracated_setup_mtree(nw_src,nw_mcast_dst,inport,controller):
       mtree2_switches = [10,14,15]
       primary_tree = [(15,14),(15,10)]
     
-    controller.primary_trees[nw_mcast_dst] = primary_tree  #TODO REFACTOR !!!!!!!!!!!!!!!!!!!
+    controller.depracted_primary_trees[nw_mcast_dst] = primary_tree  #TODO REFACTOR !!!!!!!!!!!!!!!!!!!
     return depracated_setup_mtree2_flow_tables(nw_src, nw_mcast_dst, inport,mtree2_switches,controller)
   
 
@@ -214,17 +225,17 @@ def depracated_setup_mtree1_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switche
   s5_ports = utils.find_nonvlan_flow_outport(controller.flowTables,switch_id, nw_src, h2)
   depracted_install_rewrite_dst_mcast_flow(switch_id, nw_src, s5_ports, nw_mcast_dst, h2,controller)
   controller.arpTable[switch_id][nw_mcast_dst] = appleseed.Entry(s5_ports,mcast_mac_addr)
-  controller.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h2]
+  controller.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h2]
   
   # s4: rewrite destination address from 10.10.10.10 to h1 (10.0.0.1)
   switch_id = mtree_switches[3]
   s4_ports = utils.find_nonvlan_flow_outport(controller.flowTables,switch_id, nw_src, h1)
   depracted_install_rewrite_dst_mcast_flow(switch_id, nw_src, s4_ports, nw_mcast_dst, h1,controller)  
   controller.arpTable[switch_id][nw_mcast_dst] = appleseed.Entry(s4_ports,mcast_mac_addr) 
-  controller.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h1]
+  controller.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h1]
   
-  global installed_mtrees
-  installed_mtrees.append(nw_mcast_dst)
+  global depracted_installed_mtrees
+  depracted_installed_mtrees.append(nw_mcast_dst)
   
   u_switch_id,d_switch_ids = find_mcast_measure_points(nw_src,mcast_ip_addr1,controller)
   
@@ -255,12 +266,12 @@ def depracated_setup_mtree2_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switche
   switch_id = mtree_switches[1]
   #s14_ports = utils.find_nonvlan_flow_outport(self.flowTables,switch_id, nw_src, h5)
   #self._install_rewrite_dst_mcast_flow(switch_id, nw_src, s14_ports, nw_mcast_dst, h5)
-  #self.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h5]
+  #self.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h5]
   h5_ports = utils.find_nonvlan_flow_outport(controller.flowTables,switch_id, nw_src, h5)
   h6_ports = utils.find_nonvlan_flow_outport(controller.flowTables,switch_id, nw_src, h6)
   s14_ports = {h5:h5_ports, h6:h6_ports}
   depracted_install_rewrite_dst_mcast_flow(switch_id, nw_src, s14_ports, nw_mcast_dst, [h5,h6],controller)
-  controller.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h5,h6]
+  controller.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h5,h6]
   controller.arpTable[switch_id][nw_mcast_dst] = appleseed.Entry(s14_ports,mcast_mac_addr)
 
   
@@ -276,12 +287,12 @@ def depracated_setup_mtree2_flow_tables(nw_src,nw_mcast_dst,inport,mtree_switche
   s15_ports[h9] = h9_ports
   depracted_install_rewrite_dst_mcast_flow(switch_id, nw_src, s15_ports, nw_mcast_dst, [h7,h8,h9],controller)  
   #self._install_rewrite_dst_mcast_flow(switch_id, nw_src, s15_ports, nw_mcast_dst, [h7])  
-  #self.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h7]
-  controller.mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h7,h8,h9]
+  #self.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h7]
+  controller.depracated_mtree_dstream_hosts[(nw_src,nw_mcast_dst,switch_id)] = [h7,h8,h9]
   controller.arpTable[switch_id][nw_mcast_dst] = appleseed.Entry(s15_ports,mcast_mac_addr) 
   
-  global installed_mtrees
-  installed_mtrees.append(nw_mcast_dst)
+  global depracted_installed_mtrees
+  depracted_installed_mtrees.append(nw_mcast_dst)
   
   u_switch_id,d_switch_ids = find_mcast_measure_points(nw_src,mcast_ip_addr2,controller)
   
@@ -305,21 +316,22 @@ def find_mcast_measure_points(nw_src,mcast_ip_addr1,controller):
   return -1,-1
 
 def generate_multicast_groups(controller):
-  """ Temporary solution is just use the multicast groups read from a text file (see utils.read_mtree_file).  Would like to generate multicast groups w/ a random process."""
+  """ Temporary solution is just use the multicast groups read from a text file (see utils.read_mtree_file).  Would like to generate multicast groups w/ a random process.
+      
+      Currently this a no-op as the multicast groups are already read from a text file.
+  """
   
-  return controller.mcast_groups
-
+  # considering all end_hosts, generate some random multicast groups
+  
+  # add each multicast group to controller.mcast_groups
+  
 def compute_primary_trees(controller):
   """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approxiation goes. """
-  
-  
   num_switches = len(core.openflow_discovery._dps)
-  
-  discover = core.openflow_discovery
   
   for mcast_addr in controller.mcast_groups.keys():
     
-    end_hosts = controller.mcast_groups[mcast_addr]
+    end_hosts = controller.mcast_groups[mcast_addr]   # this is the root and all terminal nodes
     root = end_hosts[0]
     terminal_hosts = end_hosts[1:]
     
@@ -328,14 +340,14 @@ def compute_primary_trees(controller):
 
     # some temporary hard-coding going on here 
     if mcast_addr == mcast_ip_addr1:
-      if num_switches == 4:
-        #edges = [(7,6),(6,4),(6,5)]
+      if num_switches == 4 and len(end_hosts) == 3: #H3S4
         edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
-      elif num_switches == 6:
-        #edges = [(3,13),(13,12),(12,11),(12,10),(4,1),(5,2)]
+      elif num_switches == 6 and len(end_hosts) == 3: #H9S6
         edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
+      elif num_switches == 8 and len(end_hosts) == 4: #H4S8
+        edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
     elif mcast_addr == mcast_ip_addr2:
-      if num_switches == 6:
+      if num_switches == 6 and len(end_hosts) == 6:
         edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
       else:
         msg = "should be 6 switches in topology when using the hard-coded multicast address %s" %(mcast_ip_addr2)
@@ -344,19 +356,21 @@ def compute_primary_trees(controller):
     data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
     tree = PrimaryTree(**data)
     
-    controller.trees_rename.append(tree)
+    controller.primary_trees.append(tree)
 
 
-
-
-def install_primary_trees(controller):
-  """  Install the already computed primary trees. Also triggers a pcount session after a 5 second delay (using a timer) """
+def install_all_trees(controller):
+  """  (1) Compute and install the primary trees. 
+       (2) Triggers a pcount session after a 5 second delay (using a timer)
+       (3) Precompute backup trees
   
-  mcast_groups = generate_multicast_groups(controller)
+   """
+  
+  generate_multicast_groups(controller)
   
   compute_primary_trees(controller)
   
-  for tree in controller.trees_rename:
+  for tree in controller.primary_trees:
     tree.install()
     u_switch_id, d_switch_ids = pcount.get_tree_measure_points(tree.root_ip_address,tree.mcast_address,controller)
     core.callDelayed(pcount.PCOUNT_CALL_FREQUENCY,pcount.start_pcount_thread,u_switch_id, d_switch_ids,tree.root_ip_address,tree.mcast_address,controller)
@@ -365,6 +379,28 @@ def install_primary_trees(controller):
   log.info(msg)
   print "\t\t %s" %(msg)
   
+  compute_backup_trees(controller)
+    
+
+def compute_backup_trees(controller):
+  """ Short-term: hard-coded backup tree + assume only one primary tree"""
+  num_switches = len(core.openflow_discovery._dps)
+  primary_tree = controller.primary_trees[0]
+  end_hosts = controller.mcast_groups[primary_tree.mcast_address]   # this is the root and all terminal nodes
+  backup_tree_edges = []
+  backup_edge = ()
+
+  if primary_tree.mcast_address == mcast_ip_addr1 and num_switches == 8 and len(end_hosts) == 4: #H4S8
+    backup_tree_edges = [(1,5),(5,11),(11,7),(11,12),(12,10),(12,9),(7,2),(9,3),(10,4)]
+    backup_edge = (5,6)
+  
+  data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
+          "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
+  backup_tree = BackupTree(**data)
+  primary_tree.backup_trees.append(backup_tree)
+  
+  if controller.backup_tree_mode == Backup_Mode.PROACTIVE:
+    backup_tree.preinstall()
   
 def find_node_id(ip_address):
   """ Takes the IP Address of a node and returns its node id number. 
@@ -377,6 +413,17 @@ def find_node_id(ip_address):
   id = parse[-1]
   return int(id) 
      
+
+def find_affected_primary_trees(primary_trees,failed_link):
+  """ Find all primary trees using the given failed_link and return as a list"""
+  affected_trees = []
+  
+  for tree in primary_trees:
+    if failed_link in tree.edges:
+      affected_trees.append(tree)
+      
+  return affected_trees
+      
 
 #####################################################################################################
 
@@ -416,31 +463,58 @@ class MulticastTree ():
     for host in neighbors:
       ip_addr = self.find_ip_address(host)
       dst_addresses.append(ip_addr)
-      outport = self.adjacency[(node_id,host)]  
+      outport = self.adjacency[(node_id,host)]
+      
+      if isinstance(outport, NoneType):
+        msg = ("Tree %s want to add install flow for link (%s,%s) which does is not the adjacency list.  It likely that the (%s,%s) was not\n" 
+          "discovered during intialization or the the tree computation algorithm added a non-existent link." %(self,node_id,host,node_id,host))
+        log.error("%s. Exiting Program." %(msg))
+        raise appleseed.AppleseedError(msg)  
+      
       host_to_port_map[ip_addr] = outport
       
     # create and install a flow entry
+    print "called install_rewrite_dst_mcast_flow(s%s,root=%s,host_prt_map=%s,mcast_addr=%s,dst_addr=%s) " %(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses)
     install_rewrite_dst_mcast_flow(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses, self.controller)
     
-  def install_nonleaf_flow(self,node_id):
+  def determine_flow_priority(self,node_id):
+    """ Determine the priority of other entries corresponding to this flow  and set the priority to be 1 greater than the existing max priority"""
+    highest_priority = -1
+    for flow_entry in self.controller.flowTables[node_id]:
+      if flow_entry.match.nw_src == self.root_ip_address and flow_entry.match.nw_dst == self.mcast_address:
+        if flow_entry.priority > highest_priority:
+          highest_priority = flow_entry.priority
+#        for flow_action in flow_entry.actions:
+#          if flow_action.type == of.OFPAT_SET_VLAN_VID and flow_action.vlan_vid == vlan_id:
+#            return flow_entry.match,flow_entry.priority
+
+    return highest_priority + 1
+  
+  def install_nonleaf_flow(self,node_id,set_priority_flag=False):
     neighbors = self.find_downstream_neighbors(node_id)
     
     outports = []
     for d_switch in neighbors:
-      outport = self.adjacency[(node_id,d_switch)]  
+      outport = self.adjacency[(node_id,d_switch)]
+      
+      if isinstance(outport, NoneType):
+        msg = ("Tree %s want to add install flow for link (%s,%s) which does is not the adjacency list.  It likely that the (%s,%s) was not\n" 
+          "discovered during intialization or the the tree computation algorithm added a non-existent link." %(self,node_id,d_switch,node_id,d_switch))
+        log.error("%s. Exiting Program." %(msg))
+        raise appleseed.AppleseedError(msg)
+      
       outports.append(outport)
-    
-    install_basic_mcast_flow(node_id,self.root_ip_address,outports,self.mcast_address,self.controller)
-    
-    
-class PrimaryTree (MulticastTree):
-  
-  def __init__(self, **kwargs):
-    MulticastTree.__init__(self, **kwargs)
-    self.backup_trees = {}  # (link) -> Tree
+      
+    # get the priority of other entries corresponding to this flow  
+    priority = -1
+    if set_priority_flag:
+      priority = self.determine_flow_priority(node_id)
+      
+    print "called install_basic_mcast_flow(s%s,root=%s,outport=%s,mcast_addr=%s,priority=%s)" %(node_id,self.root_ip_address,outports,self.mcast_address,priority)
+    install_basic_mcast_flow(node_id,self.root_ip_address,outports,self.mcast_address,priority,self.controller)
     
   def compute_node_levels(self):
-    """ Finds the level in the tree each node occupies.  Populates node_and_level_list"""
+    """ Finds the level in the tree each node occupies and returns a list of lists contain this info"""
     level = 0
     id = find_node_id(self.root_ip_address)
     upstream_ids = [id]
@@ -455,7 +529,20 @@ class PrimaryTree (MulticastTree):
       upstream_ids = downstream_ids
     return node_levels
     
+    
+class PrimaryTree (MulticastTree):
+  
+  def __init__(self, **kwargs):
+    MulticastTree.__init__(self, **kwargs)
+    self.backup_trees = []  
+    
+    
   def install(self):
+    
+    if len(self.edges) == 0:
+      msg = "Error.  Trying to install a primary tree with no edges.  Exiting program."
+      log.error(msg)
+      raise appleseed.AppleseedError(msg)
     
     # (1) order nodes from top to bottom
     node_levels = self.compute_node_levels()
@@ -485,7 +572,7 @@ class BackupTree (MulticastTree):
     MulticastTree.__init__(self, **kwargs)
     self.primary_tree = kwargs["primary_tree"]    # pointer to it's primary tree
     self.backup_edge = kwargs["backup_edge"]      # the edge the tree is backup for
-    self.nodes_to_signal = []
+    self.nodes_to_signal = []  # sorted bottom up (i.e., most downstream node is entry 0)
     self.compute_nodes_to_signal()
     
   def compute_nodes_to_signal(self):
@@ -493,9 +580,64 @@ class BackupTree (MulticastTree):
     
     Find the set of edges in the backup tree but not in the primary tree, and save the upstream node id of each edge
     """
+    if len(self.edges) == 0:
+      msg = "Error.  Backup tree has no edges.  Exiting program."
+      log.error(msg)
+      raise appleseed.AppleseedError(msg)
+    
     unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
-    upstream_nodes = [link[0] for link in unique_edges]
-    self.nodes_to_signal = upstream_nodes 
+    upstream_nodes = set([link[0] for link in unique_edges])
+    self.nodes_to_signal = self.sort_nodes_bottom_up(upstream_nodes)
+  
+  def sort_nodes_bottom_up(self,unsort_node_list):  
+    """ Sort the list of nodes bottom up and return a new list """
+    node_levels = self.compute_node_levels()
+    bottom_up = []
+    
+    leaf_level = len(node_levels)-2
+    for level in range(leaf_level,-1,-1):
+      for id in node_levels[level]:
+        if id in unsort_node_list:
+          bottom_up.append(id)
+    
+    return bottom_up
+  
+  def preinstall(self):
+    """ Proactive Algorithm. Preinstall flow entries.  Signal all nodes in 'self.nodes_to_signal' except the most upstream node"""
+    msg = "Preinstall backup trees is not yet implemented at BackupTree.preinstall().  Exciting program"
+    log.error(msg)
+    raise applseed.AppleseedError(msg)
+  
+  def reactive_install(self):
+    """ Reactive Algorithm.  Signal switches bottom up to activate backup tree."""
+    for node_id in self.nodes_to_signal:
+      if self.is_leaf_node(node_id):
+        self.install_leaf_flow(node_id)
+      else:
+        is_most_upstream = (node_id == self.nodes_to_signal[-1])
+        self.install_nonleaf_flow(node_id,is_most_upstream)
+        
+  def activate(self):
+    """ Currently just does a reactive install 
+    
+    TODO: For Proactive, signal the most upstream node
+    """
+    print "made it to BackupTree.activate()!!!!"
+    if self.controller.backup_tree_mode == Backup_Mode.REACTIVE:
+      self.reactive_install()
+    elif self.controller.backup_tree_mode == Backup_Mode.PROACIVE:
+      msg = "No yet implemented signalling the most upstream node to activate teh backup tree for the Proactive backup tree scenario. Exciting program"
+      log.error(msg)
+      raise applseed.AppleseedError(msg)
+    
+  def is_leaf_node(self,node_id):
+    """ Return True if the node_id is a leaf node.  We consider a leaf node one directly connected with a end-host. """
+    neighbors = self.find_downstream_neighbors(node_id)
+    
+    for id in neighbors:
+      if self.find_ip_address(id) in self.terminal_ip_addresses:
+        return True
+    return False
     
   def __str__(self):
     unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
@@ -503,80 +645,5 @@ class BackupTree (MulticastTree):
   
   def __repr__(self):
     return self.__str__()
-###############################################################################################################################################################################
 
-class Depracted_BackupTreeInstaller ():
-  """ TODO document
-  
-  Note: probably should be a singleton or don't need to wrap these functions into a class
-  
-  """
-  
-  def __init__ (self):
-
-    #self.flowTables = {}  # copy of the flow tables from fault_tolerant_controller
-    #self.arpTable = {}
-    #self.primary_trees = {}
-    
-     # multicast_dst_address,link -> list of tuples (u,d), representing a directed edge from u to d, that constitute all edges in the backup tree
-    self.backup_trees = {}
-    
-    self.controller = None # fault_tolerant_controller instance
- 
-   
-  def preinstall_backup_trees(self,controller):
-    
-    print "not sure if we need this"
-    
-  
-  def activate_preinstalled_backup_trees(self):
-    print "not sure if we need this"
-    
-    
-  def _sort_nodes_bottom_up(self,node_list,root_node):
-    
-    print "placeholder"
-  
-  def depracted_install_backup_trees(self,failed_link,controller):
-    """ Reactive Algorithm: install backup trees bottom-up
-    
-    Keyword Arguments:
-    failed_link -- tuple (u,d) representing a link from upstream_switch_id to the downstream_swtich_id
-    controller -- an fault_tolerant_controller instance
-    """
-    self.controller = controller
-    
-    # (1) T <- find the primary trees using failed_link
-    affected_primary_trees = self.find_affected_trees(controller.primary_trees, failed_link)
-    
-    # (2) For each T: U <- the set of switches to signal
-    for primary_tree in affected_primary_trees:
-      
-      nodes_to_signal = primary_tree.find_nodes_to_signal(failed_link)
-      primary_tree.sort_nodes_bottom_up(nodes_to_signal)
-      
-    
-    # (2a) for u \in U determine the flow entry rule
-    
-    # (3) Signal the switches 
-
-  def find_affected_trees(self,primary_trees,failed_link):
-    """ Find and return a list of trees using the failed link 
-    
-    Keyword Arguments:
-    primary_trees -- list of PrimaryTree
-    failed_link -- tuple (upstream_switch_id,downstream_switch_id)
-    
-    """
-    
-    affected_primary_trees = []
-    for primary_tree in primary_trees:
-      for link in primary_tree.edges:
-        if link == failed_link:
-          affected_primary_trees.append(primary_tree)
-          
-    return affected_primary_trees
-
-    
- 
           
