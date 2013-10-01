@@ -15,11 +15,11 @@ from mininet.net import Mininet
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 from argparse import ArgumentParser
-from dpg_topos import H2S2,H3S3,H3S2,H3S4,H9S6,H3S6
+from dpg_topos import H2S2,H3S3,H3S2,H3S4,H9S6,H4S6
 import os
 
 
-topo_classes = ["H3S2","H2S2","H3S3","H3S4","H9S6","H3S6"]
+topo_classes = ["H3S2","H2S2","H3S3","H3S4","H9S6","H4S6"]
 
 parser = ArgumentParser(description="starts a custom mininet topology and connects with a remote controller") 
 
@@ -50,7 +50,7 @@ elif args.topoclass == topo_classes[3]:
 elif args.topoclass == topo_classes[4]:
 	topo = H9S6(loss=args.loss)	
 elif args.topoclass == topo_classes[5]:
-  topo = H3S6(loss=args.loss)  
+  topo = H4S6(loss=args.loss)  
 else: 	
 	print "\nError, found no matching class for name = %s. Valid inputs include: \n\t%s \n Exiting program" %(args.topoclass,topo_classes)
 	os._exit(0)

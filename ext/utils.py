@@ -32,7 +32,7 @@ import csv,time
 def send_msg_to_switch(msg,switch_id):
   
   for con in core.openflow._connections.itervalues():
-    #print "msg to s%s: \n %s" %(switch_id,msg)
+    #print "msg to s%s" %(switch_id)
     if con.dpid == switch_id:
       con.send(msg.pack())
 
@@ -62,17 +62,18 @@ def read_mtree_file(controller):
   reads in a file specifying the nodes in a multicast tree (or trees)
   
   TODO: the location of the file is hard-coded and should be read for the command line, or improved in some way
-  
-  """
+    """
   mtree_file = "ext/topos/mtree/%s" %(multicast.mtree_file_str)
   
   # check if we need to load the mtree file
-  num_switches = multicast.measure_pnts_file_str.split("-")[1]
-  num_switches2 = multicast.mtree_file_str.split("-")[1]
+  topo1 = multicast.measure_pnts_file_str.split("-")[1]
+  topo2 = multicast.mtree_file_str.split("-")[1]
   
-  if num_switches != num_switches2:
-    log.info("did not load mtree file ('%s') because not using a valid matching measurement points file (loaded '%s')" %(multicast.mtree_file_str,multicast.measure_pnts_file_str))
-    return
+  if topo1 != topo2:
+    #log.info("did not load mtree file ('%s') because not using a valid matching measurement points file (loaded '%s')" %(multicast.mtree_file_str,multicast.measure_pnts_file_str))
+    msg = "The topology ('%s') assumed by the mtree file ('%s') did not match the topology ('%s') assumed by the measurement points file ('%s')" %(topo2,multicast.mtree_file_str,topo1,multicast.measure_pnts_file_str)
+    log.error("%s.  Exiting program." %(msg))
+    raise appleseed.AppleseedError(msg)
   
   #file structure: multicast address,src,dest1,dest2,...
   for line_list in csv.reader(open(mtree_file)):
@@ -142,9 +143,12 @@ def read_flow_measure_points_file(controller):
       controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [14,15]
     elif src_ip == multicast.h3:
       controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [4]
+    elif src_ip == multicast.h1:
+      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [6]
     else:
-      log.error("something wrong with parsing measurement file %s when finding which switch_id should strip the VLAN tag.  Exiting program." %(measure_file))
-      os._exit(0)
+      msg = "something wrong with parsing measurement file %s when finding which switch_id should strip the VLAN tag.  Exiting program." %(measure_file)
+      raise appleseed.AppleseedError(msg)
+      
       
     
     if controller.flow_measure_points.has_key(key):
@@ -238,8 +242,14 @@ def record_pcount_value(vlan_id,nw_src,nw_dst,switch_id,packet_count,is_upstream
         diff = result_list[3] - result_list[offset]
         result_list.append(diff)
         
-        if controller.check_install_backup_trees(diff):
-          controller.install_backup_trees()
+        upstream_id = int(result_list[2])
+        d_str = result_list[offset-1]
+        downstream_id = int(d_str)
+        monitored_link = (upstream_id,downstream_id) 
+        if controller.check_install_backup_trees(monitored_link,diff):
+          controller.detect_pkt_dropped_gt_threshold_time = time.clock()
+          controller.turn_pcount_off = True
+          controller.activate_backup_trees(monitored_link)
         
         if not updatedTotalDrops:
           
@@ -249,7 +259,7 @@ def record_pcount_value(vlan_id,nw_src,nw_dst,switch_id,packet_count,is_upstream
           log.debug("detected tatal packets dropped = %s, actual packets dropped=%s" %(controller.detect_total_pkt_dropped,controller.actual_total_pkt_dropped))
           
           if controller.detect_total_pkt_dropped > appleseed.packets_dropped_threshold:
-            controller.detect_pkt_dropped_gt_threshold_time = time.clock()
+            # controller.detect_pkt_dropped_gt_threshold_time = time.clock()  moved this farther up the function to reduce any lag in recording this timestamp
             detect_time_lag = controller.detect_pkt_dropped_gt_threshold_time - controller.actual_pkt_dropped_gt_threshold_time
             print "\n*************************************************************************************************************************************************************"
             print "Total detected packets dropped = %s, exceeds threshold of %s.  Actual Time=%s, Detect Time = %s, Detection Time Lag = %s" %(controller.detect_total_pkt_dropped,

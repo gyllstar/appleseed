@@ -324,7 +324,9 @@ class fault_tolerant_controller (EventMixin):
     #  self.adjacency[(switch_id,host_id)] = port
 
   def is_mcast_tree_installed(self,mcast_addr):
-    
+    """ TODO: fixme"""
+    return False
+  
     for tree in self.primary_trees:
       if tree.mcast_address == mcast_addr:
         return True
@@ -351,19 +353,24 @@ class fault_tolerant_controller (EventMixin):
         if a.protosrc != 0:
           
           if multicast.is_mcast_address(a.protodst,self):
-            log.debug("skipping normal ARP Request code because ARP request is for multicast address %s" %(str(a.protodst)))
+            log.debug("hack, because ARP request ARP request is for multicast address (%s), we send a fake mac address is the ARP reply "%(str(a.protodst)))
+            outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, a.protodst)
+            self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
+            utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             
-            #if a.protodst in multicast.installed_mtrees:
-            if self.is_mcast_tree_installed(a.protodst):
-              print "already setup mcast tree for s%s, inport=%s,dest=%s, just resending the ARP reply and skipping mcast setup." %(dpid,inport,a.protodst)
-             # utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
-            else:
-              #getting the outport requires that we have run a "pingall" to setup the flow tables for the non-multicast addreses
-              outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, multicast.h1)
-              self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
-              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
-            
-            return
+            return 
+          
+#            #if a.protodst in multicast.installed_mtrees:
+#            if self.is_mcast_tree_installed(a.protodst):
+#              print "already setup mcast tree for s%s, inport=%s,dest=%s, just resending the ARP reply and skipping mcast setup." %(dpid,inport,a.protodst)
+#              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
+#            else:
+#              #getting the outport requires that we have run a "pingall" to setup the flow tables for the non-multicast addreses
+#              outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, multicast.h1)
+#              self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
+#              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
+#            
+#            return
 
           # Learn or update port/MAC info for the SOURCE address 
           if a.protosrc in self.arpTable[dpid]:

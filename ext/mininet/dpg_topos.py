@@ -62,8 +62,8 @@ class H9S6( Topo ):
     "Simple topology example."
 
     def __init__(self,loss):
-	     super(H9S6,self).__init__()	
-	      self.loss = loss
+	super(H9S6,self).__init__()	
+	self.loss = loss
         self.generate()
 
     def generate(self):
@@ -113,7 +113,7 @@ class H3S4( Topo ):
         # Initialize topology
         Topo.__init__( self )
 	
-	     self.loss = loss
+	self.loss = loss
 
         # Add hosts and switches
         leftHost = self.addHost( 'h1' )
@@ -148,7 +148,7 @@ class H2S2( Topo ):
 
     def __init__( self,loss):
         "Create custom topo."
-	       self.loss = loss
+	self.loss = loss
 
         # Initialize topology
         Topo.__init__( self )
