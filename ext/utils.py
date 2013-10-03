@@ -145,6 +145,8 @@ def read_flow_measure_points_file(controller):
       controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [4]
     elif src_ip == multicast.h1:
       controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [6]
+    elif src_ip == multicast.h5 and dst_ip == multicast.mcast_ip_addr2:
+      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [8]
     else:
       msg = "something wrong with parsing measurement file %s when finding which switch_id should strip the VLAN tag.  Exiting program." %(measure_file)
       raise appleseed.AppleseedError(msg)

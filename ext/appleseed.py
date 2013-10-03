@@ -57,7 +57,7 @@ import time
 
 
 
-INSTALL_PRIMARY_TREES_DELAY = 10  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
+INSTALL_PRIMARY_TREES_DELAY = 20  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
 
 
 packets_dropped_threshold = 5
@@ -182,10 +182,10 @@ class fault_tolerant_controller (EventMixin):
     return pkt_loss_cnt > packets_dropped_threshold
          
   def activate_backup_trees(self,failed_link):
-    #print failed_link
-    #print "attempting to activate backup tree for (%s,%s)" %(failed_link[0],failed_link[1])
     for tree in multicast.find_affected_primary_trees(self.primary_trees,failed_link):
-      print tree,tree.backup_trees
+      msg = "installing backup tree for mcast_addr = %s for failed link %s" %(tree.mcast_address,failed_link)
+      log.info(msg)
+      print msg
       for backup in tree.backup_trees:
         if backup.backup_edge == failed_link:
           backup.activate()
