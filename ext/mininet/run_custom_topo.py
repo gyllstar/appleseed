@@ -68,10 +68,7 @@ else:
 c_addr = args.ip
 c = RemoteController('c',ip=c_addr)
 
-#net = Mininet(topo=topo,host=CPULimitedHost,link=TCLink)
-#net = Mininet(topo=topo,link=TCLink,controller=c)
 print "trying to connect to remote controller at %s ..."%(c_addr)
-#net = Mininet(topo=topo,link=TCLink,controller=lambda name: c)
 net = Mininet(topo=topo,link=TCLink,controller=lambda name: c,listenPort=6634)
 print "connected to remote controller at %s"%(c_addr)
 
@@ -107,6 +104,12 @@ for h1,h2 in pairwise(hosts):
 	print "%s %s" %(h2,cmd_str2)
 	h2.cmd(cmd_str2)
 	
+# run a ping command from h1 to special address to trigger primary tree install
+h1 = hosts[0]
+cmd_str = 'ping -c1 -W 1 10.99.99.99'
+#print "h1 %s" %(cmd_str)
+#h1.cmd(cmd_str)
+
 
 # The commented code block below is to run a ping btw all nodes.  
 #
