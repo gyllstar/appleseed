@@ -58,7 +58,8 @@ import time
 
 
 INSTALL_PRIMARY_TREES_DELAY = 20  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
-
+INSTALL_PRIMARY_TREE_TRIGGER_IP = IPAddr("10.99.99.99")
+LINK_TIMEOUT = 1000 # time the discovery module waits before considering a link removed
 
 packets_dropped_threshold = 5
 
@@ -220,22 +221,7 @@ class fault_tolerant_controller (EventMixin):
     dstaddr = packet.next.dstip
     srcaddr = packet.next.srcip
     
-    # TODO -- delete this if block
-    if multicast.is_mcast_address(dstaddr,self) and self.is_mcast_tree_installed(dstaddr):
-      #if dstaddr in multicast.installed_mtrees:
-        # should never reach here because mcast tree is setup when switch closest to root receives a msg destined for a multicast address 
-      print "already setup mcast tree for s%s, inport=%s,dest=%s." %(dpid,inport,dstaddr)
-      return
-      
-      log.info("special handling IP Packet in for multicast address %s" %(str(dstaddr)))
-      u_switch_id, d_switch_ids = multicast.depracated_setup_mtree(srcaddr,dstaddr,inport,self)
-                                            
-      msg = "started PCOUNT at multicast special processsing with  u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids, srcaddr, dstaddr)
-      log.error(msg)
-      pcount.start_pcount_thread(u_switch_id, d_switch_ids, srcaddr, dstaddr,self)
-
-      
-    elif dstaddr in self.arpTable[dpid]:
+    if dstaddr in self.arpTable[dpid]:
       # We have info about what port to send it out on...
 
       prt = self.arpTable[dpid][dstaddr].port
@@ -278,7 +264,6 @@ class fault_tolerant_controller (EventMixin):
     self.try_mtree_install_and_pcount()
     
     l = event.link
-    
     s1 = l.dpid1
     s2 = l.dpid2
     
@@ -293,8 +278,7 @@ class fault_tolerant_controller (EventMixin):
     self.adjacency[(s2,s1)] = l.port2
     
   def try_mtree_install_and_pcount(self):
-    """ If the adjacency matrix empty, thereby marking the start of topology discovery, install a primary tree with a 10 second delay.
-    """
+    """ If the adjacency matrix empty, thereby marking the start of topology discovery, install a primary tree with a 10 second delay. """
     if len(self.adjacency) == 0 and len(self.mcast_groups)>0:
       log.debug("started timer to install primary trees in %i seconds." %(INSTALL_PRIMARY_TREES_DELAY))
       core.callDelayed(INSTALL_PRIMARY_TREES_DELAY,multicast.install_all_trees,self)
@@ -323,15 +307,15 @@ class fault_tolerant_controller (EventMixin):
     #  print "adding [(%s,%s)] = %s " %(switch_id,host_id,port)
     #  self.adjacency[(switch_id,host_id)] = port
 
-  def is_mcast_tree_installed(self,mcast_addr):
-    """ TODO: fixme"""
-    return False
-  
-    for tree in self.primary_trees:
-      if tree.mcast_address == mcast_addr:
-        return True
-      
-    return False
+#  def is_mcast_tree_installed(self,mcast_addr):
+#    """ TODO: fixme"""
+#    return False
+#  
+#    for tree in self.primary_trees:
+#      if tree.mcast_address == mcast_addr:
+#        return True
+#      
+#    return False
     
   def _handle_arp_PacketIn(self,event,packet,dpid,inport):
     """ Learns the inport the switch receive packets from the given IP address
@@ -351,6 +335,14 @@ class fault_tolerant_controller (EventMixin):
     if a.prototype == arp.PROTO_TYPE_IP:
       if a.hwtype == arp.HW_TYPE_ETHERNET:
         if a.protosrc != 0:
+          
+#          if a.protodst == INSTALL_PRIMARY_TREE_TRIGGER_IP:
+#            msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
+#            log.info(msg)
+#            print msg
+#            print self.adjacency
+#            multicast.install_all_trees(self)
+#            return
           
           if multicast.is_mcast_address(a.protodst,self):
             log.debug("hack, because ARP request ARP request is for multicast address (%s), we send a fake mac address is the ARP reply "%(str(a.protodst)))
@@ -485,6 +477,7 @@ class fault_tolerant_controller (EventMixin):
 def launch ():
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
+    discovery.LINK_TIMEOUT = LINK_TIMEOUT
     core.registerNew(discovery.Discovery)
     
   core.registerNew(fault_tolerant_controller)

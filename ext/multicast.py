@@ -16,6 +16,7 @@ from pox.lib.packet.ethernet import ethernet
 from pox.core import core
 from types import NoneType
 log = core.getLogger("multicast")
+import os
 
 
 #################### Start of Hard-coded IP addresses and config files ####################
@@ -380,7 +381,6 @@ def install_all_trees(controller):
        (3) Precompute backup trees
   
    """
-  
   generate_multicast_groups(controller)
   
   compute_primary_trees(controller)
@@ -399,7 +399,7 @@ def install_all_trees(controller):
   print "\t\t %s" %(msg)
   
   compute_backup_trees(controller)
-    
+  
 
 def compute_backup_trees(controller):
   """ Short-term: hard-coded backup tree + assume only one primary tree"""
@@ -597,7 +597,6 @@ class PrimaryTree (MulticastTree):
         if self.is_host(id): 
           continue
         if self.is_leaf_node(id):
-          print "calling install_leaf_flow(%s)" %(id)
           self.install_leaf_flow(id)
         else:
           self.install_nonleaf_flow(id)
