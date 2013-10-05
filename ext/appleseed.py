@@ -179,7 +179,6 @@ class fault_tolerant_controller (EventMixin):
 
   def check_install_backup_trees(self,monitored_link,pkt_loss_cnt):
     """ Checks if the pkt_loss_cnt exceeds a threshold""" 
-    
     return pkt_loss_cnt > packets_dropped_threshold
          
   def activate_backup_trees(self,failed_link):
@@ -261,8 +260,6 @@ class fault_tolerant_controller (EventMixin):
     pox.openflow.discovery uses LLDP packets to determine the network links and the port each link is connected to at the link's endpoints. 
     The first call to this function starts a timer to install the primary trees after a 10 second delay.
     """
-    self.try_mtree_install_and_pcount()
-    
     l = event.link
     s1 = l.dpid1
     s2 = l.dpid2
@@ -277,13 +274,6 @@ class fault_tolerant_controller (EventMixin):
     self.adjacency[(s1,s2)] = l.port1
     self.adjacency[(s2,s1)] = l.port2
     
-  def try_mtree_install_and_pcount(self):
-    """ If the adjacency matrix empty, thereby marking the start of topology discovery, install a primary tree with a 10 second delay. """
-    if len(self.adjacency) == 0 and len(self.mcast_groups)>0:
-      log.debug("started timer to install primary trees in %i seconds." %(INSTALL_PRIMARY_TREES_DELAY))
-      core.callDelayed(INSTALL_PRIMARY_TREES_DELAY,multicast.install_all_trees,self)
-    #elif len(self.adjacency) == 0:
-    #  print "code here to start PCOUNT?"
     
   def add_switch_to_host_edges(self,switch_id,host_ip_addr,port):
     """ Add edges to adjacency list from switch_id to its directly connected host(s).
@@ -295,8 +285,6 @@ class fault_tolerant_controller (EventMixin):
     for key in self.adjacency.keys():
       if key[1] == host_id:
         return
-    
-    self.try_mtree_install_and_pcount()  
     
     log.info("discovered (s%s,h%s)=%s" %(switch_id,host_id,port))
     
@@ -318,14 +306,13 @@ class fault_tolerant_controller (EventMixin):
 #    return False
     
   def _handle_arp_PacketIn(self,event,packet,dpid,inport):
-    """ Learns the inport the switch receive packets from the given IP address
+    """ Learns the inport the switch receive packets from the given IP address.  Once the primary trees are installed, all ARP packets are ignored.
     
     Keyword Arguments:
     event -- the event that triggered this function call
     packet -- IP packet
     dpid -- the switch id
     inport -- 
-    
     """
     a = packet.next  # 'a' seems to be an IP packet (or actually it's an ARP packet)
     
@@ -336,13 +323,16 @@ class fault_tolerant_controller (EventMixin):
       if a.hwtype == arp.HW_TYPE_ETHERNET:
         if a.protosrc != 0:
           
-#          if a.protodst == INSTALL_PRIMARY_TREE_TRIGGER_IP:
-#            msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
-#            log.info(msg)
-#            print msg
-#            print self.adjacency
-#            multicast.install_all_trees(self)
-#            return
+          if a.protodst == INSTALL_PRIMARY_TREE_TRIGGER_IP:
+            if len(self.primary_trees) > 0:
+              return
+            
+            msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
+            log.info(msg)
+            print msg
+            print self.adjacency
+            multicast.install_all_trees(self)
+            return
           
           if multicast.is_mcast_address(a.protodst,self):
             log.debug("hack, because ARP request ARP request is for multicast address (%s), we send a fake mac address is the ARP reply "%(str(a.protodst)))
@@ -352,18 +342,10 @@ class fault_tolerant_controller (EventMixin):
             
             return 
           
-#            #if a.protodst in multicast.installed_mtrees:
-#            if self.is_mcast_tree_installed(a.protodst):
-#              print "already setup mcast tree for s%s, inport=%s,dest=%s, just resending the ARP reply and skipping mcast setup." %(dpid,inport,a.protodst)
-#              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
-#            else:
-#              #getting the outport requires that we have run a "pingall" to setup the flow tables for the non-multicast addreses
-#              outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, multicast.h1)
-#              self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
-#              utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
-#            
-#            return
-
+          # to avoid ping-ponging ARP requests after primary trees installed
+          if len(self.primary_trees)>1:
+            return
+          
           # Learn or update port/MAC info for the SOURCE address 
           if a.protosrc in self.arpTable[dpid]:
             if self.arpTable[dpid][a.protosrc] != (inport, packet.src):

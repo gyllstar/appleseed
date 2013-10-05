@@ -106,9 +106,10 @@ for h1,h2 in pairwise(hosts):
 	
 # run a ping command from h1 to special address to trigger primary tree install
 h1 = hosts[0]
-cmd_str = 'ping -c1 -W 1 10.99.99.99'
-#print "h1 %s" %(cmd_str)
-#h1.cmd(cmd_str)
+special_ip = "10.99.99.99"
+cmd_str = 'ping -c1 -W 1 %s' %(special_ip)
+print "h1 %s" %(cmd_str)
+h1.cmd(cmd_str)
 
 
 # The commented code block below is to run a ping btw all nodes.  
