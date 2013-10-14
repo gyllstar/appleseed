@@ -10,11 +10,13 @@ along with some data structures to create and manage multicast trees (Tree and P
 
 
 import utils, appleseed,pcount
+from Queue import Queue
 from pox.lib.addresses import IPAddr,EthAddr
 import pox.openflow.libopenflow_01 as of
 from pox.lib.packet.ethernet import ethernet
 from pox.core import core
 from types import NoneType
+from compiler.ast import nodes
 log = core.getLogger("multicast")
 import os
 
@@ -55,6 +57,9 @@ mtree_file_str="mtree-h6s9-2t.csv"
 
 
 depracted_installed_mtrees=[] #list of multicast addresses with an mtree already installed
+
+nodes = {} # node_id --> Node
+edges = {} #(u,d) --> Edge
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -374,7 +379,105 @@ def compute_primary_trees(controller):
     
     controller.primary_trees.append(tree)
 
+def get_node(node_id):
+  """ Either create a new Node object or retrieve one if it already exists in nodes """
+  if nodes.has_key(node_id):
+    return nodes[node_id]
+  
+  switch_ids = core.openflow_discovery._dps
+  min_switch_id = min(switch_ids)
+  is_host = False  
+  if node_id < min_switch_id:  # with Mininet hosts have the smallest id numbers
+    is_host = True
+  
+  return Node(node_id,is_host)
+  
+def mark_tree_edges(controller):
+  """ Traverse the links of each tree and mark that the tree uses that edge. """
+  for tree in controller.primary_trees:
+    for edge_id in tree.edges:
+      edge = edges[edge_id]
+      edge.trees.append(tree.id)
+      
+def create_single_tree_tagging_rules(tree_id,root_node):
+  """  BFS search of tree. u --> {d1,d2, ...} --> {e1,e2}, {e3,e4}, {e5,e6} ...  We are at 'u' and looking at the outlink of each d1, d2, ... """
+  print "\nTREE %s-----------------------------------------------------------------" %(tree_id)
+  q = Queue()
+  q.put(root_node)
+  visited = set()
+  while not q.empty():
+    node = q.get()
+    visited.add(node)
+    print "At n%s" %(node.id)
+    
+    for u_link in node.out_links:
+      if not tree_id in u_link.trees: continue
+      d_node = u_link.downstream_node
+      if d_node.is_host or d_node in visited: continue
+      
+      q.put(d_node)
+      for d_link in d_node.out_links:
+        if not tree_id in d_link.trees: continue
+        print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
+        #print "process (u,d_j, (u,d_j), (d_j,e_i)"
+    
+  print "----------------------------------------------------------------------------\n"
+  
+def create_tagging_rules(controller):
+  """ For each tree do a BFS. """  
+  for tree in controller.primary_trees:
+    root_id = find_node_id(tree.root_ip_address)
+    root_node = nodes[root_id]
+    create_single_tree_tagging_rules(tree.id,root_node)
+  
+def create_merged_primary_tree_flows(controller):
+  """ Merger Algorithm for primary trees """
+  
+  create_node_edge_objects(controller)
+  
+  mark_tree_edges(controller)
+  
+  create_tagging_rules(controller)      
+      
+  print "\n -------------------------------------------------------------------------------------------------------" 
+  print nodes
+  print " -------------------------------------------------------------------------------------------------------"
+  os._exit(0)
+  
+def create_node_edge_objects(controller):
+  """ Merger Algorithm for primary trees """
+  
+  # Switches: create new or retrieve existing, Edges: create new .  
+  
+  # create nodes and edges
+  for edge in controller.adjacency.keys():
+    u_id = edge[0]
+    d_id = edge[1]
+    
+    if edges.has_key((u_id,d_id)):    # already processed edge
+      continue
 
+    u = get_node(u_id) # create new or return existing
+    d = get_node(d_id)
+    
+    ud = Edge() 
+    ud.upstream_node = u
+    ud.downstream_node = d
+    du = Edge()
+    du.upstream_node = d
+    du.downstream_node = u
+    
+    u.out_links.append(ud)
+    u.in_links.append(du)
+    d.in_links.append(ud)
+    d.out_links.append(du)
+    
+    global nodes, edges
+    nodes[u_id] = u
+    nodes[d_id] = d
+    edges[(u_id,d_id)]= ud
+    edges[(d_id,u_id)] = du
+    
 def install_all_trees(controller):
   """  (1) Compute and install the primary trees. 
        (2) Triggers a pcount session after a 5 second delay (using a timer)
@@ -384,6 +487,9 @@ def install_all_trees(controller):
   generate_multicast_groups(controller)
   
   compute_primary_trees(controller)
+  
+  if controller.merger_optimization:
+    create_merged_primary_tree_flows(controller)
   
   for tree in controller.primary_trees:
     tree.install()
@@ -465,6 +571,7 @@ class MulticastTree ():
     self.terminal_ip_addresses = kwargs["terminals"]
     self.adjacency = kwargs["adjacency"]
     self.controller = kwargs["controller"]
+    self.id = find_node_id(self.root_ip_address)
     
   def find_ip_address(self,id):
     
@@ -472,6 +579,7 @@ class MulticastTree ():
       if find_node_id(ip) == id:
         return ip
     
+  
   def find_downstream_neighbors(self,node_id):
     
     neighbors = []
@@ -607,8 +715,7 @@ class PrimaryTree (MulticastTree):
     log.info(msg)
     
   def __str__(self):
-    
-    return "%s-->%s" %(self.mcast_address,self.edges)
+    return "Tree %s, %s-->%s" %(self.id,self.mcast_address,self.edges)
   
   def __repr__(self):
     return self.__str__()
@@ -697,4 +804,40 @@ class BackupTree (MulticastTree):
   def __repr__(self):
     return self.__str__()
 
+class Edge ():
+  
+  def __init__(self):
+    self.trees = []
+    self.tag = None
+    self.upstream_node = None
+    self.downstream_node = None
+    
+  def __str__(self):
+    tree_strs = []
+    for id in self.trees:
+      str = "T%s" %(id)
+      tree_strs.append(str)
+    return "(%s,%s), %s " %(self.upstream_node.id,self.downstream_node.id,tree_strs)
+  
+  def __repr__(self):
+    return self.__str__()    
+    
+class Node ():
+  
+  def __init__(self,id,is_host):
+    self.id = id
+    self.is_host = is_host
+    self.in_links = []
+    self.out_links = []
+    self.keep_tags = {}  #tag --> [tree_id, outports] ???
+    self.remove_tags = {}
+    self.new_tags = {}
           
+  def __str__(self):
+    type = "s"
+    if self.is_host: type = "h"
+    return "%s%s; in = %s; out=%s " %(type,self.id,self.in_links,self.out_links)
+  
+  def __repr__(self):
+    return self.__str__()    
+    

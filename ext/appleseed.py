@@ -141,9 +141,11 @@ class fault_tolerant_controller (EventMixin):
     # multicast_dst_address -> list of tuples (u,d), representing a directed edge from u to d, that constitute all edges in the primary tree
     self.depracted_primary_trees = {}
     
-    self.primary_trees = [] #TODO rename to primary
+    self.primary_trees = [] 
     
     self.backup_tree_mode = multicast.Backup_Mode.REACTIVE
+    
+    self.merger_optimization = True
   
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
@@ -329,8 +331,6 @@ class fault_tolerant_controller (EventMixin):
             
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
-            print msg
-            print self.adjacency
             multicast.install_all_trees(self)
             return
           
@@ -343,8 +343,8 @@ class fault_tolerant_controller (EventMixin):
             return 
           
           # to avoid ping-ponging ARP requests after primary trees installed
-          if len(self.primary_trees)>1:
-            return
+#          if len(self.primary_trees)>1:
+#            return
           
           # Learn or update port/MAC info for the SOURCE address 
           if a.protosrc in self.arpTable[dpid]:
