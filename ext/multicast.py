@@ -240,7 +240,7 @@ def full_overlap(tree_id,in_tag,in_set,d_node,d_link,outport):
   if in_set == d_link.trees and d_link.tag == None:  # only need to process for one of the trees using d_link
     print "\t\t Full overlap at n%s: handling T%s at %s:  %s" %(d_node.id,tree_id,d_link,in_set)
     d_link.tag = in_tag
-    d_node.update_keep_tags(d_link.trees_hash_key,in_tag,outport)
+    d_node.update_keep_tags(d_link.trees,in_tag,outport)
     return True
   elif in_set == d_link.trees:
     print "\t\t Full overlap at n%s for T%s link %s: %s, but skipping because already updated indices when processing previous trees." %(d_node.id,tree_id,d_link,in_set)
@@ -299,14 +299,16 @@ def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
   #  return True
   
   # (2) since we can't apply tag upstream, we have to add a new tag at 'd'
-  if d_node.new_tags.has_key(d_link.trees_hash_key): # already processed a link with merge set S so just reusing this tag
-    print "\t\t New merge set at n%s: another out-link at n%s has the same set of trees (%s) using this tag %s for %s" %(d_node.id,d_node.id,d_link.trees_hash_key,d_node.new_tags[d_link.trees_hash_key][0],d_link)
-    d_link.tag = d_node.new_tags[d_link.trees_hash_key][0]
-    d_node.update_new_tags(d_link.trees_hash_key,d_link.tag,outport)
+  has_tree_set_new_tag, reused_new_tag = d_node.has_tree_set_new_tag(d_link.trees)
+  if has_tree_set_new_tag:
+  #if d_node.new_tags.has_key(d_link.trees_hash_key): # already processed a link with merge set S so just reusing this tag
+    print "\t\t New merge set at n%s: another out-link at n%s has the same set of trees tag = %s for %s" %(d_node.id,d_node.id,reused_new_tag,d_link)
+    d_link.tag = reused_new_tag
+    d_node.update_new_tags(d_link.trees,d_link.tag,outport)
   else:
     print "\t\t New merge set at n%s: generate new tag T%s,%s" %(d_node.id,tree_id,d_link) 
     new_tag = 00
-    d_node.update_new_tags(d_link.trees_hash_key,new_tag,outport)
+    d_node.update_new_tags(d_link.trees,new_tag,outport)
     d_link.tag = new_tag
     
   return True
@@ -413,10 +415,7 @@ def create_node_edge_objects(controller):
     edges[(u_id,d_id)]= ud
     edges[(d_id,u_id)] = du
   
-  # need to do this because Node.trees is a set and sets are not hashable.
-  for edge in edges.values():
-    edge.generate_trees_hash_key()
-    
+
 def install_all_trees(controller):
   """  (1) Compute and install the primary trees. 
        (2) Triggers a pcount session after a 5 second delay (using a timer)
@@ -755,15 +754,6 @@ class Edge ():
     self.tag = None
     self.upstream_node = None
     self.downstream_node = None
-    self.trees_hash_key = None
-    
-  def generate_trees_hash_key(self):
-    """ Workaround because set() is not a hashable type"""
-    str = ""
-    for id in self.trees:
-      str += "T%s," %(id)
-    
-    self.trees_hash_key = str
     
   def __str__(self):
     tree_strs = []
@@ -782,11 +772,17 @@ class Node ():
     self.is_host = is_host
     self.in_links = set()
     self.out_links = set()
-    self.keep_tags = {}  # (set of trees) --> [tag, outport1, outport2, ...]
-    self.remove_tags = {}  # (tree_id) --> [tag, outport1, outport2, ...]
-    self.new_tags = {} # (set of trees) --> [tag, outport1, outport2, ...]
-    self.no_tags = {} # (tree id) --> [outport1, outport2, ...] 
-    # TODO: Watch out later for stale dict entries because we are using the (set of trees) as the hash key, and this value can change as links fail
+    self.keep_tags = {}  # (tag) --> TagSupport
+    self.remove_tags = {}  # (tag) --> TagSupport
+    self.new_tags = {} # (tag) --> TagSupport
+    self.no_tags = {} # tree_id --> [outport1, outport2, ...]
+    
+  def has_tree_set_new_tag(self,trees):
+    for tag in self.new_tags.keys():
+      support = self.new_tags[tag]
+      if support.trees == trees:
+        return True,tag
+    return False,-1
   
   def update_no_tags(self,tree_id,outport):
     if self.no_tags.has_key(tree_id):
@@ -795,30 +791,36 @@ class Node ():
     else:
       val_list = [outport]
       self.no_tags[tree_id] = val_list
-  
+      
   def update_remove_tags(self,tree_id,in_tag,outport):
-    if self.remove_tags.has_key(tree_id):
-      val_list = self.remove_tags[tree_id]
-      val_list.append(outport)
+    if self.remove_tags.has_key(in_tag):
+      tag_support = self.remove_tags[in_tag]
+      tag_support.outports.add(outport)
     else:
-      val_list = [in_tag,outport]
-      self.remove_tags[tree_id] = val_list
+      tag_support = TagSupport()
+      tag_support.trees.add(tree_id)
+      tag_support.outports.add(outport)
+      self.remove_tags[in_tag] = tag_support
   
   def update_new_tags(self,trees,tag,outport):
-    if self.new_tags.has_key(trees):
-      val_list = self.new_tags[trees]
-      val_list.append(outport)
+    if self.new_tags.has_key(tag):
+      tag_support = self.new_tags[tag]
+      tag_support.outports.add(outport)
     else:
-      val_list = [tag,outport]
-      self.new_tags[trees] = val_list  
+      tag_support = TagSupport()
+      tag_support.trees = trees
+      tag_support.outports.add(outport)
+      self.new_tags[tag] = tag_support  
           
   def update_keep_tags(self,trees,in_tag,outport):
-    if self.keep_tags.has_key(trees):
-      val_list = self.keep_tags[trees]
-      val_list.append(outport)
+    if self.keep_tags.has_key(in_tag):
+      tag_support = self.keep_tags[in_tag]
+      tag_support.outports.add(outport)
     else:
-      val_list = [in_tag,outport]
-      self.keep_tags[trees] = val_list
+      tag_support = TagSupport()
+      tag_support.trees = trees
+      tag_support.outports.add(outport)
+      self.keep_tags[in_tag] = tag_support
   
   def __str__(self):
     type = "s"
@@ -828,3 +830,18 @@ class Node ():
   def __repr__(self):
     return self.__str__()    
     
+    
+class TagSupport():
+  
+  def __init__(self):
+    self.trees = set()
+    self.outports = set()
+    
+  def __str__(self):
+    return "T = %s, ports = %s" %(self.trees,self.outports)
+  
+  def __repr__(self):
+    return self.__str__()  
+    
+  
+  
