@@ -36,9 +36,12 @@ mcast_ip_addr1 = IPAddr("10.10.10.10")
 mcast_mac_addr = EthAddr("10:10:10:10:10:10") 
 mcast_ip_addr2 = IPAddr("10.11.11.11")
 mcast_mac_addr2 = EthAddr("11:11:11:11:11:11")
+mcast_ip_addr3 = IPAddr("10.12.12.12")
+mcast_mac_addr3 = EthAddr("12:12:12:12:12:12")
 
+measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 #measure_pnts_file_str="measure-h9s6-2d-2p.csv"
-measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+#measure_pnts_file_str="measure-h6s9-1d-1p.csv"
 #measure_pnts_file_str ="measure-h4s8-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-3d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-2d-1p.csv"
@@ -49,7 +52,8 @@ measure_pnts_file_str="measure-h6s9-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s2-2p.csv"
 #measure_pnts_file_str="measure-h3s2-1p.csv"
 
-mtree_file_str="mtree-h6s9-2t.csv"
+mtree_file_str="mtree-h6s10-3t.csv"
+#mtree_file_str="mtree-h6s9-2t.csv"
 #mtree_file_str="mtree-h4s8-1t.csv"
 #mtree_file_str="mtree-h3s4-1t.csv"
 #mtree_file_str="mtree-h9s6-2t.csv"
@@ -361,6 +365,8 @@ def compute_primary_trees(controller):
         edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
       elif num_switches == 9 and len(end_hosts) == 4: #H6S9
         edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+      elif num_switches == 10 and len(end_hosts) == 4: #H6S10
+        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
       else:
         msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
         log.error(msg)
@@ -370,10 +376,15 @@ def compute_primary_trees(controller):
         edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
       elif num_switches == 9 and len(end_hosts) == 5: #H6S9
         edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+      elif num_switches == 10 and len(end_hosts) == 5: #H6S10
+        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
       else:
         msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
         log.error(msg)
         raise appleseed.AppleseedError(msg)
+    elif mcast_addr == mcast_ip_addr3:
+      if num_switches == 10 and len(end_hosts) == 4: #H6S10
+        edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
     data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
     tree = PrimaryTree(**data)
     
@@ -397,10 +408,114 @@ def mark_tree_edges(controller):
   for tree in controller.primary_trees:
     for edge_id in tree.edges:
       edge = edges[edge_id]
-      edge.trees.append(tree.id)
+      edge.trees.add(tree.id)
+   
+def full_overlap(tree_id,in_tag,in_set,d_node,d_link,outport):
+  """ Check if full overlap downstream and if so apply keep_tag """   
+  if in_tag == None or len(in_set) < 2: return False
+  if in_set == d_link.trees and d_link.tag == None:  # only need to process for one of the trees using d_link
+    print "\t\t Full overlap at n%s: handling T%s at %s:  %s" %(d_node.id,tree_id,d_link,in_set)
+    d_link.tag = in_tag
+    d_node.update_keep_tags(d_link.trees_hash_key,in_tag,outport)
+    return True
+  elif in_set == d_link.trees:
+    print "\t\t Full overlap at n%s for T%s link %s: %s, but skipping because already updated indices when processing previous trees." %(d_node.id,tree_id,d_link,in_set)
+    return True
+  return False
+ 
+ 
+def tag_upstream(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
+  """ Try to see if we can apply the tag at 'u'.  This is messy!!  """
+  if not u_node.is_host and len(in_set) == 1 and len(d_link.trees) > 1:
+    # check that all other d_link trees are not using in a tag for an incoming link to 'd'.  if this is the case, then we don't tag_upstream
+    for tid in d_link.trees:
+      if tid == tree_id: continue
+      match = False
+      for in_link in d_node.in_links:
+        if in_link == u_link: continue
+        if len(in_link.trees) == 1 and tid in in_links.trees:
+          match = True
+          break
+      if match == False:
+        return False
+    
+    if in_tag == None:
+      print "\t\twrite tag upstream, keep downstream"
+      tag = -1
+      if d_link.tag != None:
+        tag = d_link.tag
+      else: 
+        new_tag = 11
+        tag = new_tag
       
-def create_single_tree_tagging_rules(tree_id,root_node):
-  """  BFS search of tree. u --> {d1,d2, ...} --> {e1,e2}, {e3,e4}, {e5,e6} ...  We are at 'u' and looking at the outlink of each d1, d2, ... """
+      u_port = controller.adjacency[(u_node.id,d_node.id)]
+      u_node.update_new_tags(u_link.trees_hash_key,tag,u_port)
+      u_link.tag = tag
+      d_link.tag = tag
+      d_node.update_keep_tags(u_link.trees_hash_key,tag,outport)
+      return True
+    elif d_node.keep_tags.has_key(u_link.trees_hash_key):
+      print "keep tags"
+      d_link.tag = in_tag
+      d_node.update_keep_tags(u_link.trees_hash_key,in_tag,outport)
+      return True
+    else:
+      msg = "error when trying to apply tag at the upstream node"
+      raise appleseed.AppleseedError(msg)
+  return False
+
+def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
+  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False """  
+  if len(d_link.trees) == 1: return False
+  if d_link.tag != None:    # because a tree processed earlier has already handled the tagging
+    print "\t\t New merge set at n%s: %s already has a tag (%s) for the new merge set (%s) so reusing this tag. " %(d_node.id,d_link,d_link.tag,d_link.trees) 
+    return True  
+  
+  #if tag_upstream(tree_id, u_node, u_link, in_tag, in_set, d_node, d_link, outport):    # may want to skip this because it's ugly
+  #  return True
+  
+  # (2) since we can't apply tag upstream, we have to add a new tag at 'd'
+  if d_node.new_tags.has_key(d_link.trees_hash_key): # already processed a link with merge set S so just reusing this tag
+    print "\t\t New merge set at n%s: another out-link at n%s has the same set of trees (%s) using this tag %s for %s" %(d_node.id,d_node.id,d_link.trees_hash_key,d_node.new_tags[d_link.trees_hash_key][0],d_link)
+    d_link.tag = d_node.new_tags[d_link.trees_hash_key][0]
+    d_node.update_new_tags(d_link.trees_hash_key,d_link.tag,outport)
+  else:
+    print "\t\t New merge set at n%s: generate new tag T%s,%s" %(d_node.id,tree_id,d_link) 
+    new_tag = 00
+    d_node.update_new_tags(d_link.trees_hash_key,new_tag,outport)
+    d_link.tag = new_tag
+    
+  return True
+  
+def no_merge(tree_id,d_node,d_link,outport):
+  """ Process a single flow """ 
+  print "\t\t no merge: T%s at %s" %(tree_id,d_link) 
+  d_node.update_no_tags(tree_id,outport)
+  
+def create_node_tags(controller,tree_id,u_link,d_node):
+  """ u --> {d1,d2, ...}.  We are at 'u' and looking at the outlink of each d1, d2, ... """
+  for d_link in d_node.out_links:
+    if not tree_id in d_link.trees: continue
+    print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
+    
+    outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
+    if full_overlap(tree_id,u_link.tag,u_link.trees,d_node,d_link,outport): 
+      continue
+    
+    # if we've made it here then we do not have a full_overlap case so need to add an existing tag the remove list
+    if u_link.tag != None:
+      d_node.update_remove_tags(tree_id,u_link.tag,outport)
+      print "\t\t Remove tag at n%s for %s and old-set=%s" %(d_node.id,d_link,u_link.trees)
+      
+    if new_merge_set(tree_id,u_link.upstream_node,u_link,u_link.tag,u_link.trees,d_node,d_link,outport): 
+      continue
+    else:
+      no_merge(tree_id,d_node,d_link,outport)
+    
+    #print "process (u,d_j, (u,d_j), (d_j,e_i)"  
+      
+def create_single_tree_tagging_indices(controller,tree_id,root_node):
+  """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules. """
   print "\nTREE %s-----------------------------------------------------------------" %(tree_id)
   q = Queue()
   q.put(root_node)
@@ -416,11 +531,7 @@ def create_single_tree_tagging_rules(tree_id,root_node):
       if d_node.is_host or d_node in visited: continue
       
       q.put(d_node)
-      for d_link in d_node.out_links:
-        if not tree_id in d_link.trees: continue
-        print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
-        #print "process (u,d_j, (u,d_j), (d_j,e_i)"
-    
+      create_node_tags(controller,tree_id, u_link, d_node)
   print "----------------------------------------------------------------------------\n"
   
 def create_tagging_rules(controller):
@@ -428,7 +539,7 @@ def create_tagging_rules(controller):
   for tree in controller.primary_trees:
     root_id = find_node_id(tree.root_ip_address)
     root_node = nodes[root_id]
-    create_single_tree_tagging_rules(tree.id,root_node)
+    create_single_tree_tagging_indices(controller,tree.id,root_node)
   
 def create_merged_primary_tree_flows(controller):
   """ Merger Algorithm for primary trees """
@@ -467,16 +578,20 @@ def create_node_edge_objects(controller):
     du.upstream_node = d
     du.downstream_node = u
     
-    u.out_links.append(ud)
-    u.in_links.append(du)
-    d.in_links.append(ud)
-    d.out_links.append(du)
+    u.out_links.add(ud)
+    u.in_links.add(du)
+    d.in_links.add(ud)
+    d.out_links.add(du)
     
     global nodes, edges
     nodes[u_id] = u
     nodes[d_id] = d
     edges[(u_id,d_id)]= ud
     edges[(d_id,u_id)] = du
+  
+  # need to do this because Node.trees is a set and sets are not hashable.
+  for edge in edges.values():
+    edge.generate_trees_hash_key()
     
 def install_all_trees(controller):
   """  (1) Compute and install the primary trees. 
@@ -527,6 +642,11 @@ def compute_backup_trees(controller):
       if num_switches == 9 and len(end_hosts) == 5: #H6S9
         backup_tree_edges = [(5,7),(7,13),(13,9),(13,14),(14,12),(14,11),(12,15),(9,2),(11,3),(12,4),(15,6)]
         backup_edge = (7,8)
+    
+    if len(backup_tree_edges) == 0:
+      msg = "no backup trees edges are specified for T%s" %(primary_tree.id)
+      log.info(msg)
+      continue
     
     data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
             "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
@@ -807,10 +927,19 @@ class BackupTree (MulticastTree):
 class Edge ():
   
   def __init__(self):
-    self.trees = []
+    self.trees = set()
     self.tag = None
     self.upstream_node = None
     self.downstream_node = None
+    self.trees_hash_key = None
+    
+  def generate_trees_hash_key(self):
+    """ Workaround because set() is not a hashable type"""
+    str = ""
+    for id in self.trees:
+      str += "T%s," %(id)
+    
+    self.trees_hash_key = str
     
   def __str__(self):
     tree_strs = []
@@ -827,12 +956,46 @@ class Node ():
   def __init__(self,id,is_host):
     self.id = id
     self.is_host = is_host
-    self.in_links = []
-    self.out_links = []
-    self.keep_tags = {}  #tag --> [tree_id, outports] ???
-    self.remove_tags = {}
-    self.new_tags = {}
+    self.in_links = set()
+    self.out_links = set()
+    self.keep_tags = {}  # (set of trees) --> [tag, outport1, outport2, ...]
+    self.remove_tags = {}  # (tree_id) --> [tag, outport1, outport2, ...]
+    self.new_tags = {} # (set of trees) --> [tag, outport1, outport2, ...]
+    self.no_tags = {} # (tree id) --> [outport1, outport2, ...] 
+    # TODO: Watch out later for stale dict entries because we are using the (set of trees) as the hash key, and this value can change as links fail
+  
+  def update_no_tags(self,tree_id,outport):
+    if self.no_tags.has_key(tree_id):
+      val_list = self.no_tags[tree_id]
+      val_list.append(outport)
+    else:
+      val_list = [outport]
+      self.no_tags[tree_id] = val_list
+  
+  def update_remove_tags(self,tree_id,in_tag,outport):
+    if self.remove_tags.has_key(tree_id):
+      val_list = self.remove_tags[tree_id]
+      val_list.append(outport)
+    else:
+      val_list = [in_tag,outport]
+      self.remove_tags[tree_id] = val_list
+  
+  def update_new_tags(self,trees,tag,outport):
+    if self.new_tags.has_key(trees):
+      val_list = self.new_tags[trees]
+      val_list.append(outport)
+    else:
+      val_list = [tag,outport]
+      self.new_tags[trees] = val_list  
           
+  def update_keep_tags(self,trees,in_tag,outport):
+    if self.keep_tags.has_key(trees):
+      val_list = self.keep_tags[trees]
+      val_list.append(outport)
+    else:
+      val_list = [in_tag,outport]
+      self.keep_tags[trees] = val_list
+  
   def __str__(self):
     type = "s"
     if self.is_host: type = "h"
