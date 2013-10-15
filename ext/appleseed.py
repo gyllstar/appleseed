@@ -138,9 +138,6 @@ class fault_tolerant_controller (EventMixin):
     # vlan_id -> [nw_src,nw_dst, u_switch_id,u_count,d_switch_id,d_count,u_count-dcount]
     self.pcount_results = dict()
     
-    # multicast_dst_address -> list of tuples (u,d), representing a directed edge from u to d, that constitute all edges in the primary tree
-    self.depracted_primary_trees = {}
-    
     self.primary_trees = [] 
     
     self.backup_tree_mode = multicast.Backup_Mode.REACTIVE
