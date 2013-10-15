@@ -19,6 +19,61 @@ from argparse import ArgumentParser
 from mininet.util import dumpNodeConnections
 
 
+class H6S10( Topo ):
+    "Simple topology example."
+
+    def __init__(self,loss):
+      super(H6S10,self).__init__()  
+      self.loss = loss
+      self.generate()
+
+    def generate(self):
+      "Create custom topo."
+
+      # Add hosts and switches
+      h1 = self.addHost( 'h1' )
+      h2 = self.addHost( 'h2' )
+      h3 = self.addHost( 'h3' )
+      h4 = self.addHost( 'h4' )
+      h5 = self.addHost( 'h5' )
+      h6 = self.addHost( 'h6' )
+      s7 = self.addSwitch( 's7' )
+      s8 = self.addSwitch( 's8' )
+      s9 = self.addSwitch( 's9' )
+      s10 = self.addSwitch( 's10' )
+      s11 = self.addSwitch( 's11' )
+      s12 = self.addSwitch( 's12' )
+      s13 = self.addSwitch( 's13' )
+      s14 = self.addSwitch( 's14' )
+      s15 = self.addSwitch( 's15' )
+      s16 = self.addSwitch( 's16' )
+
+      # Add links
+
+      self.addLink( h1, s7)
+      self.addLink( h5, s7)
+      self.addLink( s7, s13)
+      self.addLink( s7, s8)
+      self.addLink( s13, s9)
+      self.addLink( s13, s14)
+      self.addLink( s8, s9)
+      self.addLink( s8, s10)
+      self.addLink( s14, s12)
+      self.addLink( s14, s11)
+      self.addLink( s10, s11)
+      self.addLink( s10, s12)
+      self.addLink( s12, s15)
+      self.addLink( s9, h2)
+      self.addLink( s11, h3)
+      self.addLink( s12, h4)
+      self.addLink( s15, h6)
+      self.addLink( s9, s16)
+      self.addLink( s16, s10)
+
+
+
+
+
 class H6S9( Topo ):
     "Simple topology example."
 
