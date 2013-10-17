@@ -38,6 +38,7 @@ mcast_ip_addr2 = IPAddr("10.11.11.11")
 mcast_mac_addr2 = EthAddr("11:11:11:11:11:11")
 mcast_ip_addr3 = IPAddr("10.12.12.12")
 mcast_mac_addr3 = EthAddr("12:12:12:12:12:12")
+dummy_mac_addr = EthAddr("99:99:99:99:99:99")
 
 measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 #measure_pnts_file_str="measure-h9s6-2d-2p.csv"
@@ -64,6 +65,9 @@ depracted_installed_mtrees=[] #list of multicast addresses with an mtree already
 
 nodes = {} # node_id --> Node
 edges = {} #(u,d) --> Edge
+default_keep_tag_flow_priority = of.OFP_DEFAULT_PRIORITY - 1
+default_new_tag_flow_priority = default_keep_tag_flow_priority + 1
+default_no_tag_flow_priority = default_keep_tag_flow_priority + 1
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -360,7 +364,7 @@ def create_single_tree_tagging_indices(controller,tree_id,root_node):
       create_node_tags(controller,tree_id, u_link, d_node)
   print "----------------------------------------------------------------------------\n"
   
-def create_tagging_rules(controller):
+def create_tag_indices(controller):
   """ For each tree do a BFS. """  
   for tree in controller.primary_trees:
     root_id = find_node_id(tree.root_ip_address)
@@ -374,13 +378,148 @@ def create_merged_primary_tree_flows(controller):
   
   mark_tree_edges(controller)
   
-  create_tagging_rules(controller)      
+  create_tag_indices(controller)
+  
+  create_merged_flow_rules(controller)      
       
   print "\n -------------------------------------------------------------------------------------------------------" 
   print nodes
   print " -------------------------------------------------------------------------------------------------------"
   os._exit(0)
+
+def REMOVE_ME_install_keep_tag_flow(tag,ports,priority,switch_id,controller):
+  """ Install a flow table rule matching on the Ethernet tag and action is forward out the the specified ports.  """
+  msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
+  msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, dl_dst = tag)
   
+  for prt in ports:
+    msg.actions.append(of.ofp_action_output(port = prt))
+  
+  
+  msg.priority = priority
+    
+  utils.send_msg_to_switch(msg, switch_id)
+  controller.cache_flow_table_entry(switch_id, msg)
+    
+  
+def create_keep_tag_ofp_rules(node):
+  """ Generate rules to keep tag.  Match on the tag.  Action is to send in the outport."""
+  keep_rules = {}  # tag --> ofp_msg
+  for tag in node.keep_tags.keys():
+    outports = node.keep_tags[tag].outports
+    #install_keep_tag_flow(tag,outports,default_keep_tag_flow_priority,node.id,controller)
+    
+    msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
+    msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, dl_dst = tag)
+    for prt in outports:
+      msg.actions.append(of.ofp_action_output(port = prt))
+    msg.priority = default_keep_tag_flow_priority
+    keep_rules[tag] = msg
+    
+  return keep_rules
+
+def find_tree_root_and_mcast_addr(tree_id,controller):
+  
+  for tree in controller.primary_trees:
+    if tree.id == tree_id:
+      return tree.root_ip_address,tree.mcast_address
+  msg = "Error looking up the root and multicast address of T%s.  " %(tree_id)
+  raise appleseed.AppleseedError(msg)
+
+def create_new_ether_dst_ofp_rule(root_addr,mcast_addr,outports,ether_dst):
+  """ Create and return rule that:
+          - match: using the multicast src address and destination address, and
+          - action:  write the Ethernet dest field (either a tag or the original value) and forward packets out the list of ports"""
+  msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
+  msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
+  
+  new_tag_action = of.ofp_action_dl_addr.set_dst(ether_dst)
+  msg.actions.append(new_tag_action)
+  for prt in outports:
+    msg.actions.append(of.ofp_action_output(port = prt))
+  msg.priority = default_new_tag_flow_priority
+  
+  return msg
+
+
+def create_new_tag_rules(node,keep_rules,controller):
+  """ Generate rules to create new tag.
+      
+      Old Steps:
+        (1) We check the remove_tags list to see if we can create flow entries that have: (a) match - based on the remove-tag and (b) action - write new tag.  
+            This allows us to avoid having to have a flow entry rule for each multicast destination address to write the new tag.
+        (2) If we can update a keep_tag rule that uses the remove-tag than add an action to write the new tag for the relevant outport
+        (3) Worst case, we create a flow entry with (a) match -- destination ip address, (b) action -- write the new-tag
+  """
+  new_tag_rules = {} # tree_id --> ofp_msg
+  for new_tag in node.new_tags.keys():
+    support = node.new_tags[new_tag]
+    for tree in support.trees:
+      root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree, controller)
+      new_prts = support.outports
+      rule = create_new_ether_dst_ofp_rule(root_addr,mcast_addr,new_prts,new_tag)
+      new_tag_rules[tree] = rule
+      
+  return new_tag_rules
+
+def append_ether_dst_ofp_action(ofp_rule,ether_dst,ports):
+  new_ether_action = of.ofp_action_dl_addr.set_dst(ether_dst)
+  ofp_rule.actions.append(new_ether_action)
+  for prt in ports:
+    ofp_rule.actions.append(of.ofp_action_output(port = prt))
+                            
+def split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller):
+  """ Handle case where a remove_tag is also found in keep_tag index.  In this case we need to split the keep_tag into a separate flow entry for each tree in keep_tag."""
+  for rm_tag in node.remove_tags.keys():
+    if node.keep_tags.has_key(rm_tag):
+      keep_support = node.keep_tags[rm_tag]
+      for tree_id in keep_support.trees:
+        if new_tag_rules.has_key(tree_id):
+          rule = new_tag_rules[tree_id]
+          append_ether_dst_ofp_action(rule, rm_tag, keep_support.outports)
+        elif no_tag_rules.has_key(tree_id):
+          rule = no_tag_rules[tree_id]
+          append_ether_dst_ofp_action(rule, rm_tag, keep_support.outports)
+        else:
+          root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
+          rule = create_new_ether_dst_ofp_rule(root_addr, mcast_addr, keep_support.outports, rm_tag)
+          new_tag_rules[rm_tag] = rule
+      del keep_rules[rm_tag]
+    
+  return keep_rules,new_tag_rules,no_tag_rules
+    
+    
+def create_no_tag_rules(node,new_tag_rules,controller):
+  """ Generate rule for no tag"""
+  no_tag_rules = {}
+  for tree_id in node.no_tags.keys():
+    root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
+    #old_mac = controller.arpTable[node.id][mcast_addr].mac
+    old_mac = dummy_mac_addr
+    outports = node.no_tags[tree_id]
+    
+    if new_tag_rules.has_key(tree_id):
+      # append to existing rule for this tree
+      rule = new_tag_rules[tree_id]
+      append_ether_dst_ofp_action(rule, old_mac, outports)
+    else:
+      # create a new rule
+      rule = create_new_ether_dst_ofp_rule(root_addr, mcast_addr, outports, old_mac)
+      no_tag_rules[tree_id] = rule
+  return no_tag_rules
+  
+def create_merged_flow_rules(controller):
+  """ Use the tag indices of each node to create the merged flow entriies and install them."""
+  for node in nodes.values():
+    keep_rules = create_keep_tag_ofp_rules(node)
+    new_tag_rules = create_new_tag_rules(node,keep_rules,controller)
+    no_tag_rules = create_no_tag_rules(node,new_tag_rules,controller)
+    node.keep_rules, node.new_tag_rules,node.no_tag_rules = split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller)
+    
+    node.print_rule_summary()
+    
+  # TODO: handle leaf node action to rewrite the IP address to that of the downstream host
+
 def create_node_edge_objects(controller):
   """ Merger Algorithm for primary trees """
   
@@ -777,6 +916,10 @@ class Node ():
     self.new_tags = {} # (tag) --> TagSupport
     self.no_tags = {} # tree_id --> [outport1, outport2, ...]
     
+    self.keep_rules = {}   # tag --> ofp_rule
+    self.new_tag_rules = {} # tree_id --> ofp_rule
+    self.no_tag_rules = {} # tree_id --> ofp_rule
+    
   def has_tree_set_new_tag(self,trees):
     for tag in self.new_tags.keys():
       support = self.new_tags[tag]
@@ -821,6 +964,34 @@ class Node ():
       tag_support.trees = trees
       tag_support.outports.add(outport)
       self.keep_tags[in_tag] = tag_support
+  
+  
+  def print_rule_summary(self):
+#        self.keep_rules = {}   # tag --> ofp_rule
+#    self.new_tag_rules = {} # tree_id --> ofp_rule
+#    self.no_tag_rules = {} # tree_id --> ofp_rule
+    if self.is_host: 
+      return
+    print "----------------------------------------------- n%s rules -----------------------------------------------" %(self.id)
+    str = "Keep Tag: "
+    for tag in self.keep_rules:
+      ofp_rule = self.keep_rules[tag]
+      num_actions = len(ofp_rule.actions)
+      str += "tag=%s, # actions= %s; \t" %(tag,num_actions)
+    print str
+    str = "New Tag: "
+    for tree_id in self.new_tag_rules:
+      ofp_rule = self.new_tag_rules[tree_id]
+      num_actions = len(ofp_rule.actions)
+      str += "New Tag: T%s, # actions= %s; \t" %(tree_id,num_actions)
+    print str
+    str = "No Tag: "
+    for tree_id in self.no_tag_rules:
+      ofp_rule = self.no_tag_rules[tree_id]
+      num_actions = len(ofp_rule.actions)
+      str += "T%s, # actions= %s; \t" %(tree_id,num_actions)
+    print str
+    print "-----------------------------------------------------------------------------------------------------------"
   
   def __str__(self):
     type = "s"
