@@ -73,8 +73,9 @@ new_tags = [EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("6
 def enum(**enums):
     return type('Enum', (), enums)
   
-Backup_Mode = enum(REACTIVE=1,PROACTIVE=2,MERGER=3)
-
+Backup_Mode = enum(REACTIVE=1,PROACTIVE=2)
+Mode = enum(BASELINE=1,MERGER=2,MERGER_DEPRACATED=3)
+                                
 
 def is_mcast_address(dst_ip_address,controller):
   return controller.mcast_groups.has_key(dst_ip_address)
@@ -238,9 +239,10 @@ def mark_tree_edges(controller):
       edge = edges[edge_id]
       edge.trees.add(tree.id)
    
+
 def full_overlap(tree_id,in_tag,in_set,d_node,d_link,outport):
   """ Check if full overlap downstream and if so apply keep_tag """   
-  if in_tag == None or len(in_set) < 2: return False
+  if in_tag == None: return False
   if in_set == d_link.trees and d_link.tag == None:  # only need to process for one of the trees using d_link
     print "\t\t Full overlap at n%s: handling T%s at %s:  %s" %(d_node.id,tree_id,d_link,in_set)
     d_link.tag = in_tag
@@ -295,8 +297,11 @@ def tag_upstream(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
 def generate_new_tag():
   return new_tags.pop()
 
-def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
-  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False """  
+def depracted_new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
+  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False.  
+  
+      Reuse a new tag from another out-link at 'd' if the two links share the same set of merged trees.
+  """  
   if len(d_link.trees) == 1: return False
   if d_link.tag != None:    # because a tree processed earlier has already handled the tagging
     print "\t\t New merge set at n%s: %s already has a tag (%s) for the new merge set (%s) so reusing this tag. " %(d_node.id,d_link,d_link.tag,d_link.trees) 
@@ -319,20 +324,61 @@ def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
     d_link.tag = new_tag
     
   return True
+
+def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
+  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False.
+  
+      We do NOT reuse tags from other out-links.
+   """  
+  if d_link.tag != None:    # because a tree processed earlier has already handled the tagging
+    print "\t\t New merge set at n%s: %s already has a tag (%s) for the new merge set (%s) so reusing this tag. " %(d_node.id,d_link,d_link.tag,d_link.trees) 
+    return True  
+  
+  #if tag_upstream(tree_id, u_node, u_link, in_tag, in_set, d_node, d_link, outport):    # may want to skip this because it's ugly
+  #  return True
+  
+  print "\t\t New merge set at n%s: generate new tag T%s,%s" %(d_node.id,tree_id,d_link) 
+  new_tag = generate_new_tag()
+  d_node.update_new_tags(d_link.trees,new_tag,outport)
+  d_link.tag = new_tag
+    
+  return True
   
 def no_merge(tree_id,d_node,d_link,outport):
   """ Process a single flow """ 
   print "\t\t no merge: T%s at %s" %(tree_id,d_link) 
   d_node.update_no_tags(tree_id,outport)
   
-def create_node_tags(controller,tree_id,u_link,d_node):
+def depracted_create_node_tags(controller,tree_id,u_link,d_node):
   """ u --> {d1,d2, ...}.  We are at 'u' and looking at the outlink of each d1, d2, ... """
   for d_link in d_node.out_links:
     if not tree_id in d_link.trees: continue
     print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
     
     outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
-    if full_overlap(tree_id,u_link.tag,u_link.trees,d_node,d_link,outport): 
+    if len(u_link.trees) > 1 and full_overlap(tree_id,u_link.tag,u_link.trees,d_node,d_link,outport): 
+      continue
+    
+    # if we've made it here then we do not have a full_overlap case so need to add an existing tag the remove list
+    if u_link.tag != None:
+      d_node.update_remove_tags(tree_id,u_link.tag,outport)
+      print "\t\t Remove tag at n%s for %s and old-set=%s" %(d_node.id,d_link,u_link.trees)
+      
+    if depracted_new_merge_set(tree_id,u_link.upstream_node,u_link,u_link.tag,u_link.trees,d_node,d_link,outport): 
+      continue
+    else:
+      no_merge(tree_id,d_node,d_link,outport)
+      
+def create_node_tags(controller,tree_id,u_link,d_node):
+  """ u --> {d1,d2, ...}.  We are at 'u' and looking at the outlink of each d1, d2, ... """
+  tag_reused = False
+  for d_link in d_node.out_links:
+    if not tree_id in d_link.trees: continue
+    print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
+    
+    outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
+    if not tag_reused and full_overlap(tree_id,u_link.tag,u_link.trees,d_node,d_link,outport): 
+      tag_reused = True
       continue
     
     # if we've made it here then we do not have a full_overlap case so need to add an existing tag the remove list
@@ -343,10 +389,10 @@ def create_node_tags(controller,tree_id,u_link,d_node):
     if new_merge_set(tree_id,u_link.upstream_node,u_link,u_link.tag,u_link.trees,d_node,d_link,outport): 
       continue
     else:
+      out = "Should never reach this point.  T%s processing d_link=%s lead to a no_tag scenario.  Exiting." %(tree_id,d_link)
+      raise appleseedError(out)
       no_merge(tree_id,d_node,d_link,outport)
     
-    #print "process (u,d_j, (u,d_j), (d_j,e_i)"  
-      
 def create_single_tree_tagging_indices(controller,tree_id,root_node):
   """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules. """
   print "\nTREE %s-----------------------------------------------------------------" %(tree_id)
@@ -364,7 +410,13 @@ def create_single_tree_tagging_indices(controller,tree_id,root_node):
       if d_node.is_host or d_node in visited: continue
       
       q.put(d_node)
-      create_node_tags(controller,tree_id, u_link, d_node)
+      
+      if controller.merger_optimization == Mode.MERGER_DEPRACATED:
+        depracted_create_node_tags(controller,tree_id, u_link, d_node)
+      elif controller.merger_optimization == Mode.MERGER:
+        create_node_tags(controller,tree_id, u_link, d_node)
+      else:
+        raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
   print "----------------------------------------------------------------------------\n"
   
 def create_tag_indices(controller):
@@ -475,7 +527,8 @@ def depracted_create_new_ether_dst_ofp_rule(root_addr,mcast_addr,outports,ether_
 
 
 def create_new_tag_rules(node,keep_rules,controller):
-  """ Generate rules to create new tag.
+  """ Generate rules to create new tag. Create a flow entry with (a) match -- destination ip address, (b) action -- write the new-tag.  If a tree
+      has multiple new_tag entries, the actions are combined into a single rule for said tree.
       
       Old Steps:
         (1) We check the remove_tags list to see if we can create flow entries that have: (a) match - based on the remove-tag and (b) action - write new tag.  
@@ -490,16 +543,30 @@ def create_new_tag_rules(node,keep_rules,controller):
       tree = get_tree(tree_id, controller)
       root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
       new_prts = support.outports
+      
+      existing_rule = None
+      #check if we can append the action to an existing rule for this tree
+      if new_tag_rules.has_key(tree_id):
+        existing_rule = new_tag_rules[tree_id]
+      
       if tree.is_leaf_node(node.id):
-        rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
-        rule.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
-        rule.priority = default_new_tag_flow_priority
         host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-        rule = append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports,new_prts,dst_addresses,host_to_port_map,new_tag)
-        new_tag_rules[tree_id] = rule
+        if existing_rule != None:
+          append_rewrite_dst_ofp_action(controller,node.id,existing_rule, switch_ports,new_prts,dst_addresses,host_to_port_map,new_tag)
+          new_tag_rules[tree_id] = existing_rule
+        else:
+          rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
+          rule.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
+          rule.priority = default_new_tag_flow_priority
+          rule = append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports,new_prts,dst_addresses,host_to_port_map,new_tag)
+          new_tag_rules[tree_id] = rule
       else:
-        rule = depracted_create_new_ether_dst_ofp_rule(root_addr,mcast_addr,new_prts,new_tag)
-        new_tag_rules[tree_id] = rule
+        if existing_rule != None:
+          append_ether_dst_ofp_action(existing_rule, new_tag, new_prts)
+          new_tag_rules[tree_id] = existing_rule
+        else:
+          rule = depracted_create_new_ether_dst_ofp_rule(root_addr,mcast_addr,new_prts,new_tag)
+          new_tag_rules[tree_id] = rule
       
   return new_tag_rules
 
@@ -684,7 +751,7 @@ def install_all_trees(controller):
   
   compute_primary_trees(controller)
   
-  if controller.merger_optimization:
+  if controller.merger_optimization != Mode.BASELINE:
     create_merged_primary_tree_flows(controller)
   else:   # run baseline
     for tree in controller.primary_trees:

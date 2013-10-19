@@ -142,8 +142,7 @@ class fault_tolerant_controller (EventMixin):
     
     self.backup_tree_mode = multicast.Backup_Mode.REACTIVE
     
-    self.merger_optimization = True
-  
+    self.merger_optimization = multicast.Mode.MERGER
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
     #       more than a single pair of measurement points
