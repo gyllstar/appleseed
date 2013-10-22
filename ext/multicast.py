@@ -40,9 +40,9 @@ mcast_ip_addr3 = IPAddr("10.12.12.12")
 mcast_mac_addr3 = EthAddr("12:12:12:12:12:12")
 dummy_mac_addr = EthAddr("99:99:99:99:99:99")
 
-measure_pnts_file_str="measure-h6s10-1d-1p.csv"
+#measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 #measure_pnts_file_str="measure-h9s6-2d-2p.csv"
-#measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+measure_pnts_file_str="measure-h6s9-1d-1p.csv"
 #measure_pnts_file_str ="measure-h4s8-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-3d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-2d-1p.csv"
@@ -53,8 +53,8 @@ measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s2-2p.csv"
 #measure_pnts_file_str="measure-h3s2-1p.csv"
 
-mtree_file_str="mtree-h6s10-3t.csv"
-#mtree_file_str="mtree-h6s9-2t.csv"
+#mtree_file_str="mtree-h6s10-3t.csv"
+mtree_file_str="mtree-h6s9-2t.csv"
 #mtree_file_str="mtree-h4s8-1t.csv"
 #mtree_file_str="mtree-h3s4-1t.csv"
 #mtree_file_str="mtree-h9s6-2t.csv"
@@ -73,7 +73,7 @@ new_tags = [EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("6
 def enum(**enums):
     return type('Enum', (), enums)
   
-Backup_Mode = enum(REACTIVE=1,PROACTIVE=2)
+BackupMode = enum(REACTIVE=1,PROACTIVE=2)
 Mode = enum(BASELINE=1,MERGER=2,MERGER_DEPRACATED=3)
                                 
 
@@ -232,12 +232,20 @@ def get_node(node_id):
   
   return Node(node_id,is_host)
   
-def mark_tree_edges(controller):
+def mark_primary_tree_edges(controller):
   """ Traverse the links of each tree and mark that the tree uses that edge. """
   for tree in controller.primary_trees:
     for edge_id in tree.edges:
       edge = edges[edge_id]
       edge.trees.add(tree.id)
+      
+def mark_backup_tree_edges(controller):
+  """ Traverse the links of each tree and mark that the tree uses that edge. """
+  for ptree in controller.primary_trees:
+    for btree in ptree.backup_trees:
+      for edge_id in btree.edges:
+        edge = edges[edge_id]
+        edge.add_backup_tree(btree.id,btree.backup_edge)
    
 
 def full_overlap(tree_id,in_tag,in_set,d_node,d_link,outport):
@@ -404,43 +412,129 @@ def create_single_tree_tagging_indices(controller,tree_id,root_node):
     visited.add(node)
     print "At n%s" %(node.id)
     
-    for u_link in node.out_links:
-      if not tree_id in u_link.trees: continue
-      d_node = u_link.downstream_node
+    for d_link in node.out_links:
+      if not tree_id in d_link.trees: continue
+      d_node = d_link.downstream_node
       if d_node.is_host or d_node in visited: continue
       
       q.put(d_node)
       
       if controller.merger_optimization == Mode.MERGER_DEPRACATED:
-        depracted_create_node_tags(controller,tree_id, u_link, d_node)
+        depracted_create_node_tags(controller,tree_id, d_link, d_node)
       elif controller.merger_optimization == Mode.MERGER:
-        create_node_tags(controller,tree_id, u_link, d_node)
+        create_node_tags(controller,tree_id, d_link, d_node)
       else:
         raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
   print "----------------------------------------------------------------------------\n"
   
+def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge):
+  """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules.
+      
+      Unlike processing of primary trees, which when at 'u' and looking at the outlink of each d1, d2, ... and sets the tagging indices at d1, d2, ...
+      the indexing for backup trees looks at 'u' and its out-links and sets the tags at u (rather than at d1, d2) only if u is the upstream node of
+      a disjoint backup tree link.
+   """
+  print "\nBACKUP TREE %s for edge = %s -----------------------------------------------------------------" %(btree_id,backup_edge)
+  q = Queue()
+  q.put(root_node)
+  visited = set()
+  while not q.empty():
+    node = q.get()
+    visited.add(node)
+    if node.id != root_node.id and node.is_host:
+      print "Skipped h%s because is a host." %(node.id)
+      continue
+    
+    print "Visiting n%s" %(node.id)
+    
+    for d_link in node.out_links:
+      # check d_link is actually used by this backup tree
+      if not d_link.backup_trees.has_key(backup_edge): continue
+      if not btree_id in d_link.backup_trees[backup_edge]: continue
+      d_node = d_link.downstream_node
+      if d_node in visited: continue
+      
+      q.put(d_node)
+      
+      if node.id not in btree.nodes_to_signal:      # still want to continue BFS from d_node, just don't need to add any tags
+        msg= "\t skipping n%s for B%s because n%s does not have an edge  disjoint from its primary tree." %(node.id,btree_id,node.id)
+        log.debug(msg)
+        print msg
+        continue
+      
+
+      if controller.merger_optimization == Mode.MERGER:
+        print "\t processing B%s, (%s,%s)" %(btree_id,node.id,d_node.id)
+        #create_node_tags(controller,btree_id, d_link, d_node)
+      else:
+        raise appleseed.AppleseedError("No relevant optimization strategy set for backup trees..  Exiting.")
+  print "----------------------------------------------------------------------------\n"  
+
 def create_tag_indices(controller):
   """ For each tree do a BFS. """  
   for tree in controller.primary_trees:
     root_id = find_node_id(tree.root_ip_address)
     root_node = nodes[root_id]
     create_single_tree_tagging_indices(controller,tree.id,root_node)
+ 
+def find_backup_edges(controller):
+  """ Create and return a list of all backup edges"""
+  backup_map = {}
+  for ptree in controller.primary_trees:
+    for btree in ptree.backup_trees:
+      edge = btree.backup_edge
+      if backup_map.has_key(edge):
+        backup_map[edge].add(btree)
+      else:
+        backup_set = set()
+        backup_set.add(btree)
+        backup_map[edge] = backup_set
+        
+  print backup_map
+  return backup_map
+         
+      
+def create_backup_tree_tag_indices(controller):
+  """ For each backup_edge, create the indices for all backup trees using this edge. """
+  backup_map = find_backup_edges(controller)
+  for backup_edge in backup_map:
+    for backup_tree in backup_map[backup_edge]:
+      root_id = find_node_id(backup_tree.root_ip_address)
+      root_node = nodes[root_id]
+      create_single_backup_tree_tagging_indices(controller,backup_tree,backup_tree.id,root_node,backup_edge)   
+    
+def create_merged_backup_tree_flows(controller):
+  """ Merger Algorithm for primary trees """
   
-def create_merged_primary_tree_flows(controller):
+  mark_backup_tree_edges(controller)
+  
+  print "\n--------------------------------Marked Edge Objects--------------------------------------------"
+  for edge in edges.values():
+    edge.print_if_marked()
+  print "-------------------------------------------------------------------------------------------------"
+  
+  create_backup_tree_tag_indices(controller)
+  
+  print "Exit for Backup Tree Merger Tagging development."
+  os._exit(0)
+  
+  create_install_merged_flow_rules(controller)      
+      
+def create_install_merged_primary_tree_flows(controller):
   """ Merger Algorithm for primary trees """
   
   create_node_edge_objects(controller)
   
-  mark_tree_edges(controller)
+  mark_primary_tree_edges(controller)
   
   create_tag_indices(controller)
   
-  create_merged_flow_rules(controller)      
+  create_install_merged_flow_rules(controller)      
       
   print "\n -------------------------------------------------------------------------------------------------------" 
   print "\t\t  INSTALLED MERGED FLOW ENTRIES!!!! "
   print " -------------------------------------------------------------------------------------------------------"
-  #os._exit(0)
+  
 
 def get_tree(tree_id,controller):
   for tree in controller.primary_trees:
@@ -622,25 +716,6 @@ def split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller):
   return keep_rules,new_tag_rules,no_tag_rules
     
     
-def old_create_no_tag_rules(node,new_tag_rules,controller):
-  """ Generate rule for no tag"""
-  no_tag_rules = {}
-  for tree_id in node.no_tags.keys():
-    root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
-    #old_mac = controller.arpTable[node.id][mcast_addr].mac
-    old_mac = dummy_mac_addr
-    outports = node.no_tags[tree_id]
-    
-    if new_tag_rules.has_key(tree_id):
-      # append to existing rule for this tree
-      rule = new_tag_rules[tree_id]
-      append_ether_dst_ofp_action(rule, old_mac, outports)
-    else:
-      # create a new rule
-      rule = depracted_create_new_ether_dst_ofp_rule(root_addr, mcast_addr, outports, old_mac)
-      no_tag_rules[tree_id] = rule
-  return no_tag_rules
-    
 def in_link_is_no_tag(node,tree_id):
   """ Check node's in_links to see if any link is traversed only by tree_id.   
       
@@ -695,7 +770,7 @@ def create_no_tag_rules(node,new_tag_rules,controller):
       no_tag_rules[tree_id] = rule
   return no_tag_rules
   
-def create_merged_flow_rules(controller):
+def create_install_merged_flow_rules(controller):
   """ Use the tag indices of each node to create the merged flow entriies and install them."""
   for node in nodes.values():
     keep_rules = create_keep_tag_ofp_rules(node,controller)
@@ -752,7 +827,7 @@ def install_all_trees(controller):
   compute_primary_trees(controller)
   
   if controller.merger_optimization != Mode.BASELINE:
-    create_merged_primary_tree_flows(controller)
+    create_install_merged_primary_tree_flows(controller)
   else:   # run baseline
     for tree in controller.primary_trees:
       tree.install()
@@ -801,8 +876,11 @@ def compute_backup_trees(controller):
     backup_tree = BackupTree(**data)
     primary_tree.backup_trees.append(backup_tree) 
     
-    if controller.backup_tree_mode == Backup_Mode.PROACTIVE:
-      backup_tree.preinstall()
+    if controller.merger_optimization == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+      backup_tree.preinstall_baseline_backups()
+  
+  if controller.merger_optimization == Mode.MERGER:    
+    create_merged_backup_tree_flows(controller)
   
 def find_node_id(ip_address):
   """ Takes the IP Address of a node and returns its node id number. 
@@ -1033,8 +1111,8 @@ class BackupTree (MulticastTree):
     
     return bottom_up
   
-  def preinstall(self):
-    """ Used by the Proactive Algorithm to preinstall flow entries.  Signal all nodes in 'self.nodes_to_signal' except the most upstream node"""
+  def preinstall_baseline_backups(self):
+    """ Used by the Proactive Algorithm to preinstall_baseline_backups flow entries.  Signal all nodes in 'self.nodes_to_signal' except the most upstream node"""
     for node_id in self.nodes_to_signal:
       if self.is_leaf_node(node_id):
         self.install_leaf_flow(node_id)
@@ -1053,13 +1131,37 @@ class BackupTree (MulticastTree):
         is_most_upstream = (node_id == self.nodes_to_signal[-1])
         self.install_nonleaf_flow(node_id,is_most_upstream)
   
-  
-  def activate(self):
-    """ Activate the backup tree.  For Proactive, signal the most upstream node.  For reactive signal all relevant nodes bottom up. """
-   
-    if self.controller.backup_tree_mode == Backup_Mode.REACTIVE:
+  def activate_baseline_backups(self):
+    """ Baseline Algorithm for recovery."""
+    if self.controller.backup_tree_mode == BackupMode.REACTIVE:
       self.reactive_install()
-    elif self.controller.backup_tree_mode == Backup_Mode.PROACIVE:    # only need signal the most upstream node
+    elif self.controller.backup_tree_mode == BackupMode.PROACIVE:    # only need signal the most upstream node
+      most_upstream_node = self.nodes_to_signal[-1]
+      is_most_upstream = True
+      self.install_nonleaf_flow(node_id,is_most_upstream)
+
+  def activate_merger_backups(self):
+    """ Baseline Algorithm for recovery."""    
+      
+    
+  def activate(self):
+    """ Activate the backup tree.  For Proactive, signal the most upstream node.  For reactive signal all relevant nodes bottom up. 
+    
+        Note: this means that we are signalling one tree at-a-time to activate backups, rather than iterating over the set of switches and sending messages
+              for all backup trees to that switch before moving to the next switch.
+    """
+    if self.controller.merger_optimization == Mode.MERGER:
+      self.activate_baseline_backups()
+    elif self.controller.merger_optimization == Mode.BASELINE:
+      self.activate_baseline_backups()
+    elif self.controller.merger_optimization == Mode.MERGER_DEPRACATED:
+      raise appleseed.AppleseedError("No implementation of backup tree activation for MERGER_DEPRACATED mode.")
+    else:
+      raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
+    
+    if self.controller.backup_tree_mode == BackupMode.REACTIVE:
+      self.reactive_install()
+    elif self.controller.backup_tree_mode == BackupMode.PROACIVE:    # only need signal the most upstream node
       most_upstream_node = self.nodes_to_signal[-1]
       is_most_upstream = True
       self.install_nonleaf_flow(node_id,is_most_upstream)
@@ -1083,17 +1185,72 @@ class BackupTree (MulticastTree):
 class Edge ():
   
   def __init__(self):
-    self.trees = set()
-    self.tag = None
     self.upstream_node = None
     self.downstream_node = None
+    self.trees = set()
+    self.tag = None
     
+    self.backup_trees = {}      # backup_edge --> set(tree_id2,tree_id2,...)
+    self.backup_tags = {}     # backup_edge --> tag 
+  
+  def add_backup_tree(self, tree_id,backup_edge):
+    if self.backup_trees.has_key(backup_edge):
+      self.backup_trees[backup_edge].add(tree_id)
+    else:
+      btrees = set()
+      btrees.add(tree_id)
+      self.backup_trees[backup_edge] = btrees
+    
+    
+  def print_if_marked(self):
+    """ Only prints output if the Edge is used by a tree of backup tree"""
+    tree_strs = []
+    for id in self.trees:
+      tstr = "T%s" %(id)
+      tree_strs.append(tstr)
+      
+    backup_strs = []
+    if len(self.backup_trees) > 0:
+      
+      for backup_edge in self.backup_trees:
+        bstr="b_edge="
+        bstr += str(backup_edge)
+        bstr += ", ("
+        for id in self.backup_trees[backup_edge]:
+          bstr += "B%s," %(id)
+        bstr +=")"
+        backup_strs.append(bstr)
+    
+    if len(tree_strs) == 0 and len(backup_strs) == 0:
+      return
+    if len(backup_strs) == 0:
+      print "\t (%s,%s), %s " %(self.upstream_node.id,self.downstream_node.id,tree_strs)
+    else:
+      print "\t (%s,%s), P=%s, B=%s" %(self.upstream_node.id,self.downstream_node.id,tree_strs,backup_strs)
+    
+  
   def __str__(self):
     tree_strs = []
     for id in self.trees:
-      str = "T%s" %(id)
-      tree_strs.append(str)
-    return "(%s,%s), %s " %(self.upstream_node.id,self.downstream_node.id,tree_strs)
+      tstr = "T%s" %(id)
+      tree_strs.append(tstr)
+      
+    backup_strs = []
+    if len(self.backup_trees) > 0:
+      
+      for backup_edge in self.backup_trees:
+        bstr="b_edge="
+        bstr += str(backup_edge)
+        bstr += ", ("
+        for id in self.backup_trees[backup_edge]:
+          bstr += "B%s," %(id)
+        bstr +=")"
+        backup_strs.append(bstr)
+    
+    if len(backup_strs) == 0:
+      return "(%s,%s), %s " %(self.upstream_node.id,self.downstream_node.id,tree_strs)
+    else:
+      return "(%s,%s), P=%s,B=%s" %(self.upstream_node.id,self.downstream_node.id,tree_strs,backup_strs)
   
   def __repr__(self):
     return self.__str__()    
