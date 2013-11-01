@@ -68,7 +68,11 @@ edges = {} #(u,d) --> Edge
 default_keep_tag_flow_priority = of.OFP_DEFAULT_PRIORITY 
 default_new_tag_flow_priority = default_keep_tag_flow_priority + 1
 default_no_tag_flow_priority = default_keep_tag_flow_priority + 1
-new_tags = [EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("66:66:66:66:66:13"),EthAddr("66:66:66:66:66:12"),EthAddr("66:66:66:66:66:11"),EthAddr("66:66:66:66:66:10")]
+new_tags = [EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("66:66:66:66:66:37"),EthAddr("66:66:66:66:66:36"),EthAddr("66:66:66:66:66:35"),EthAddr("66:66:66:66:66:34"),
+            EthAddr("66:66:66:66:66:33"),EthAddr("66:66:66:66:66:32"),EthAddr("66:66:66:66:66:31"),EthAddr("66:66:66:66:66:30"),EthAddr("66:66:66:66:66:29"),EthAddr("66:66:66:66:66:28"),
+            EthAddr("66:66:66:66:66:27"),EthAddr("66:66:66:66:66:26"),EthAddr("66:66:66:66:66:25"),EthAddr("66:66:66:66:66:24"),EthAddr("66:66:66:66:66:23"),EthAddr("66:66:66:66:66:22"),
+            EthAddr("66:66:66:66:66:21"),EthAddr("66:66:66:66:66:20"),EthAddr("66:66:66:66:66:19"),EthAddr("66:66:66:66:66:18"),EthAddr("66:66:66:66:66:17"),EthAddr("66:66:66:66:66:16"),
+            EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("66:66:66:66:66:13"),EthAddr("66:66:66:66:66:12"),EthAddr("66:66:66:66:66:11"),EthAddr("66:66:66:66:66:10")]
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -237,6 +241,10 @@ def mark_primary_tree_edges(controller):
   for tree in controller.primary_trees:
     for edge_id in tree.edges:
       edge = edges[edge_id]
+      # Short-term test, remove for correct behavior
+      #if tree.id == 1 and (edge_id == (8,9) or edge_id == (9,2)):
+      #  print "For Testing Skipping Marking %s with T%s even though T%s uses %s." %(edge_id,tree.id,tree.id,edge_id)
+      #  continue
       edge.trees.add(tree.id)
       
 def mark_backup_tree_edges(controller):
@@ -378,7 +386,7 @@ def depracted_create_node_tags(controller,tree_id,u_link,d_node):
       no_merge(tree_id,d_node,d_link,outport)
       
 def create_node_tags(controller,tree_id,u_link,d_node):
-  """ u --> {d1,d2, ...}.  We are at 'u' and looking at the outlink of each d1, d2, ... """
+  """ We are at 'd_node' comparing each of its outlinks to u_link in order to set tagging rules at d_node """
   tag_reused = False
   for d_link in d_node.out_links:
     if not tree_id in d_link.trees: continue
@@ -386,7 +394,7 @@ def create_node_tags(controller,tree_id,u_link,d_node):
     
     outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
     if not tag_reused and full_overlap(tree_id,u_link.tag,u_link.trees,d_node,d_link,outport): 
-      tag_reused = True
+      #tag_reused = True
       continue
     
     # if we've made it here then we do not have a full_overlap case so need to add an existing tag the remove list
@@ -400,6 +408,85 @@ def create_node_tags(controller,tree_id,u_link,d_node):
       out = "Should never reach this point.  T%s processing d_link=%s lead to a no_tag scenario.  Exiting." %(tree_id,d_link)
       raise appleseedError(out)
       no_merge(tree_id,d_node,d_link,outport)
+      
+def keep_tag(btree_id,tag,backup_trees,backup_edge,d_node,d_link,outport,primary_tree_overlap=True):
+  """ Use the tag of the primary tree using d_link. """
+  if not d_link.backup_tags.has_key(backup_edge): # only need to process for one of the backup trees using d_link
+    if primary_tree_overlap:
+      print "\t\t Processed B%s at s%s, adding a keep_tag for d_link=%s, reusing primary_tree tag. " %(btree_id,d_node.id,d_link)
+    else:
+      print "\t\t Processed B%s at s%s, adding a keep tag for d_link=%s but no primary tree overlap on this edge.  " %(btree_id,d_node.id,d_link)
+    d_link.backup_tags[backup_edge] = tag
+    d_node.update_keep_backup_tags(backup_trees,backup_edge,tag,outport)
+  else:
+    if primary_tree_overlap:
+      print "\t\t Processed B%s at s%s, keep_tag that reuses the primary_tree tag at d_link=%s already processed by another tree so skipping."  %(btree_id,d_node.id,d_link)
+    else:
+      print "\t\t Processed B%s at s%s, skipped adding a keep tag for d_link=%s where there is no primary tree overlap on this edge because already processed by another tree.  " %(btree_id,d_node.id,d_link)
+      
+def new_tag(btree_id,old_tag,tag,backup_trees,backup_edge,d_node,d_link,outport,primary_tree_overlap=True):
+  """ Create a new tag index equal to 'tag' """
+  if not d_link.backup_tags.has_key(backup_edge): # only need to process for one of the backup trees using d_link
+    if primary_tree_overlap:
+      print "\t\t Processed B%s at s%s, adding a new_tag for d_link=%s, equal to primary_tree tag. " %(btree_id,d_node.id,d_link)
+    else:
+      print "\t\t Processed B%s at s%s, adding a new_tag for d_link=%s, NOT equal to primary_tree tag because no overlap on this edge. " %(btree_id,d_node.id,d_link)
+    d_link.backup_tags[backup_edge] = tag
+    d_node.update_new_backup_tags(backup_trees,backup_edge,tag,outport)
+    if old_tag != None:
+      d_node.update_remove_backup_tags(backup_trees,backup_edge,old_tag,outport)
+  else:
+    if primary_tree_overlap:
+      print "\t\t Processed B%s at s%s, new_tag for d_link=%s, equal to primary_tree tag, already processed by another tree so skipping."  %(btree_id,d_node.id,d_link)
+    else:
+      print "\t\t Processed B%s at s%s, skipped adding a new_tag for d_link=%s, NOT equal to primary_tree tag because already processed by another tree. " %(btree_id,d_node.id,d_link)
+    
+  
+def create_node_backup_tags(controller,btree_id,u_link,d_node,backup_edge):
+  """  We are at 'd_node' comparing each of its outlinks to u_link in order to set tagging rules at d_node. """
+  primary_tag_reused = False
+  backup_tag_reused = False
+  new_tag_applied = False
+  for d_link in d_node.out_links:
+    if not d_link.backup_trees.has_key(backup_edge): continue
+    if not btree_id in d_link.backup_trees[backup_edge]: continue
+    
+    d_link_backup_trees = d_link.backup_trees[backup_edge]
+    print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
+    outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
+    
+    # (1) check d_link for tag used by primary trees
+    
+    # (1a) check if can keep_tag of primary tree
+    d_link_primary_tag = d_link.tag
+    u_link_backup_tag = None
+    if u_link.backup_tags.has_key(backup_edge):
+      u_link_backup_tag = u_link.backup_tags[backup_edge]
+      
+    if d_link_primary_tag == u_link_backup_tag and d_link_primary_tag != None:
+      print "\t\t keep primary tag "
+      keep_tag(btree_id, d_link_primary_tag, d_link_backup_trees,backup_edge, d_node, d_link, outport)
+      continue
+    elif d_link_primary_tag != None:
+     # (1b) create new_tag equal to primary tag if primary_tree has a tag on d_link
+      print "\t\t new tag equal to primary_tag"
+      new_tag(btree_id,u_link_backup_tag,d_link_primary_tag, d_link_backup_trees,backup_edge, d_node, d_link, outport)
+      continue
+    
+    # (2) if primary tree does not use (d_link will have no primary tree tag), create new_tag or reuse u_link_backup_tag if possible.
+    # (2a) check if can do keep_tag of backup tree
+    u_backup_trees = u_link.backup_trees[backup_edge]
+    d_backup_trees = d_link.backup_trees[backup_edge]
+    if u_backup_trees == d_backup_trees and u_link_backup_tag != None:
+      print "\t\t keep_tag for backups "
+      keep_tag(btree_id, u_link_backup_tag, d_link_backup_trees, backup_edge, d_node, d_link, outport,False)
+    else:
+      # (2b) create tag for backup_tree. 
+      #     Note that whether this backup tree does or does not overlap w/ other backup tree for same backup edge, the processing for this tree is exactly the same.
+      tag = generate_new_tag()
+      print "\t\t create new tag for backup"
+      new_tag(btree_id, u_link_backup_tag, tag, d_link_backup_trees, backup_edge, d_node, d_link, outport,False)
+
     
 def create_single_tree_tagging_indices(controller,tree_id,root_node):
   """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules. """
@@ -429,10 +516,6 @@ def create_single_tree_tagging_indices(controller,tree_id,root_node):
   
 def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge):
   """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules.
-      
-      Unlike processing of primary trees, which when at 'u' and looking at the outlink of each d1, d2, ... and sets the tagging indices at d1, d2, ...
-      the indexing for backup trees looks at 'u' and its out-links and sets the tags at u (rather than at d1, d2) only if u is the upstream node of
-      a disjoint backup tree link.
    """
   print "\nBACKUP TREE %s for edge = %s -----------------------------------------------------------------" %(btree_id,backup_edge)
   q = Queue()
@@ -441,31 +524,32 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
   while not q.empty():
     node = q.get()
     visited.add(node)
-    if node.id != root_node.id and node.is_host:
-      print "Skipped h%s because is a host." %(node.id)
-      continue
+    #if node.id == root_node.id and node.is_host:
+    #  print "\t Skipped h%s because is a host." %(node.id)
+    #  continue
     
-    print "Visiting n%s" %(node.id)
+    print "Visiting s%s" %(node.id)
     
     for d_link in node.out_links:
       # check d_link is actually used by this backup tree
       if not d_link.backup_trees.has_key(backup_edge): continue
       if not btree_id in d_link.backup_trees[backup_edge]: continue
       d_node = d_link.downstream_node
-      if d_node in visited: continue
+      if d_node.is_host or d_node in visited: 
+        print "\t Skipped h%s because is a host." %(d_node.id)
+        continue
       
       q.put(d_node)
       
-      if node.id not in btree.nodes_to_signal:      # still want to continue BFS from d_node, just don't need to add any tags
-        msg= "\t skipping n%s for B%s because n%s does not have an edge  disjoint from its primary tree." %(node.id,btree_id,node.id)
-        log.debug(msg)
+      if d_node.id not in btree.nodes_to_signal:      # still want to continue BFS from d_node, just don't need to add any tags
+        msg= "\t Skipping in-link=(%s,%s) versus s%s's outlinks for B%s because s%s does not have an edge  disjoint from its primary tree." %(node.id,d_node.id,d_node.id,btree_id,d_node.id)
+        #log.debug(msg)
         print msg
         continue
-      
 
       if controller.merger_optimization == Mode.MERGER:
-        print "\t processing B%s, (%s,%s)" %(btree_id,node.id,d_node.id)
-        #create_node_tags(controller,btree_id, d_link, d_node)
+        print "\t processing B%s, in-link=(%s,%s) versus s%s's outlinks, to set the tagging rules at s%s " %(btree_id,node.id,d_node.id,d_node.id,d_node.id)
+        create_node_backup_tags(controller,btree_id, d_link, d_node,backup_edge)
       else:
         raise appleseed.AppleseedError("No relevant optimization strategy set for backup trees..  Exiting.")
   print "----------------------------------------------------------------------------\n"  
@@ -518,7 +602,7 @@ def create_merged_backup_tree_flows(controller):
   print "Exit for Backup Tree Merger Tagging development."
   os._exit(0)
   
-  create_install_merged_flow_rules(controller)      
+  #create_install_merged_flow_rules(controller)      
       
 def create_install_merged_primary_tree_flows(controller):
   """ Merger Algorithm for primary trees """
@@ -673,7 +757,11 @@ def append_ether_dst_ofp_action(ofp_rule,ether_dst,ports):
   return ofp_rule
                             
 def split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller):
-  """ Handle case where a remove_tag is also found in keep_tag index.  In this case we need to split the keep_tag into a separate flow entry for each tree in keep_tag."""
+  """ Handle case where a remove_tag is also found in keep_tag index.  This means that we are at node where the trees (or some subset thereof) branch on at least one out-link
+      but share one out-link. In this case we need to split the keep_tag into a separate flow entry for each tree in keep_tag.
+      
+      10/22: tried to refactor this so the keep_tag match rule was reused when a subset (or all) trees in keep_tag have the same new_tag rule.
+  """
   for rm_tag in node.remove_tags.keys():
     if node.keep_tags.has_key(rm_tag):
       keep_support = node.keep_tags[rm_tag]
@@ -776,6 +864,7 @@ def create_install_merged_flow_rules(controller):
     keep_rules = create_keep_tag_ofp_rules(node,controller)
     new_tag_rules = create_new_tag_rules(node,keep_rules,controller)
     no_tag_rules = create_no_tag_rules(node,new_tag_rules,controller)
+    
     node.keep_rules, node.new_tag_rules,node.no_tag_rules = split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller)
     
     node.print_rule_summary()
@@ -1267,6 +1356,10 @@ class Node ():
     self.new_tags = {} # (tag) --> TagSupport
     self.no_tags = {} # tree_id --> [outport1, outport2, ...]
     
+    self.backup_keep_tags = {}  # (backup_edge) --> {(tag) --> TagSupport}
+    self.backup_remove_tags = {}  # (backup_edge) --> {(tag) --> TagSupport}
+    self.backup_new_tags = {} # (backup_edge) --> {(tag) --> TagSupport}
+    
     self.keep_rules = {}   # tag --> ofp_rule
     self.new_tag_rules = {} # tree_id --> ofp_rule
     self.no_tag_rules = {} # tree_id --> ofp_rule
@@ -1328,6 +1421,57 @@ class Node ():
       tag_support.trees = trees
       tag_support.outports.add(outport)
       self.keep_tags[in_tag] = tag_support
+      
+  def update_keep_backup_tags(self,backup_trees,backup_edge,tag,outport):
+    if self.backup_keep_tags.has_key(backup_edge):
+      backup_tags = self.backup_keep_tags[backup_edge]
+      if backup_tags.has_key(tag):
+        tag_support = backup_tags[tag]
+        tag_support.outports.add(outport)
+      else:
+        tag_support = TagSupport()
+        tag_support.trees = backup_trees
+        tag_support.outports.add(outport)
+        backup_tags[tag] = tag_support
+    else:
+      tag_support = TagSupport()
+      tag_support.trees = backup_trees
+      tag_support.outports.add(outport)
+      self.backup_keep_tags[backup_edge] = {tag:tag_support}
+  
+  def update_new_backup_tags(self,backup_trees,backup_edge,tag,outport):
+    if self.backup_new_tags.has_key(backup_edge):
+      backup_tags = self.backup_new_tags[backup_edge]
+      if backup_tags.has_key(tag):
+        tag_support = backup_tags[tag]
+        tag_support.outports.add(outport)
+      else:
+        tag_support = TagSupport()
+        tag_support.trees = backup_trees
+        tag_support.outports.add(outport)
+        backup_tags[tag] = tag_support
+    else:
+      tag_support = TagSupport()
+      tag_support.trees = backup_trees
+      tag_support.outports.add(outport)
+      self.backup_new_tags[backup_edge] = {tag:tag_support} 
+ 
+  def update_remove_backup_tags(self,backup_trees,backup_edge,tag,outport):
+    if self.backup_remove_tags.has_key(backup_edge):
+      backup_tags = self.backup_remove_tags[backup_edge]
+      if backup_tags.has_key(tag):
+        tag_support = backup_tags[tag]
+        tag_support.outports.add(outport)
+      else:
+        tag_support = TagSupport()
+        tag_support.trees = backup_trees
+        tag_support.outports.add(outport)
+        backup_tags[tag] = tag_support
+    else:
+      tag_support = TagSupport()
+      tag_support.trees = backup_trees
+      tag_support.outports.add(outport)
+      self.backup_remove_tags[backup_edge] = {tag:tag_support}      
   
   def print_rule_summary(self):
     if self.is_host: 
