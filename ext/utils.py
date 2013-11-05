@@ -29,6 +29,20 @@ import multicast,appleseed
 import csv,time
 
 
+
+def get_ofp_rule_str(rule):
+  """ Create and return a string with ofp_rule match and actions"""
+  prefix = '    '
+  out_str = "match: \n"
+  out_str += rule.match.show(prefix)
+  out_str += "action: \n"
+  cnt=0
+  for action in rule.actions:
+    cnt+=1
+    out_str += '  (%s)' %(cnt)
+    #prefix = '   (%s) ' %(cnt)
+    out_str += action.show(prefix)
+  return out_str
 def send_msg_to_switch(msg,switch_id):
   
   for con in core.openflow._connections.itervalues():
