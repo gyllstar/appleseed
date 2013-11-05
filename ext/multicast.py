@@ -1605,6 +1605,12 @@ class Node ():
     
   def install_ofp_rules(self,controller):
     """ Install the ofp_rules."""
+    for rule in self.installed_ofp_rules:
+      utils.send_msg_to_switch(rule, self.id)
+      controller.cache_flow_table_entry(self.id, rule)
+
+  def print_ofp_rules(self,controller):
+    """ Install the ofp_rules."""
     cnt = 0
     print "S%s Rules ------------------------------------------------------------------------------------------------------------------------------------------------------------" %(self.id)
     for rule in self.installed_ofp_rules:
@@ -1612,6 +1618,7 @@ class Node ():
       print "S%s Rule %s " %(self.id,cnt)
       print "%s \n" %(utils.get_ofp_rule_str(rule))
   
+
 class FlowEntry(): 
 
   def __init__(self):
@@ -1647,8 +1654,8 @@ class FlowEntry():
       tag = self.outport_tags[outport]
       
       if tag.type == TagType.HOST_DST_ADDR:
-        #l2_addr = controller.arpTable[switch_id][tag.value].mac
-        l2_addr = dummy_mac_addr
+        l2_addr = controller.arpTable[switch_id][tag.value].mac
+        #l2_addr = dummy_mac_addr
         write_l2_action = of.ofp_action_dl_addr.set_dst(l2_addr)
         ofp_rule.actions.append(write_l2_action)
         write_l3_action = of.ofp_action_nw_addr.set_dst(tag.value)
