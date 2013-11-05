@@ -7,6 +7,7 @@
 
 import unittest
 import appleseed,multicast
+from multicast import TagType
 from pox.lib.addresses import IPAddr,EthAddr
 import pox.openflow.libopenflow_01 as of
 from pox.lib.packet.ethernet import ethernet
@@ -22,6 +23,73 @@ def setup():
   multicast.edges.clear()
 
 
+def get_num_type_matches(node_id,type):
+  
+  node = multicast.nodes[node_id]
+  actual_value = 0
+  for flow_entry in node.flow_entries:
+    match = flow_entry.match_tag
+    if match.type == type:
+      actual_value += 1
+  
+  return actual_value
+
+def get_num_type_actions(node_id,type):
+  
+  node = multicast.nodes[node_id]
+  actual_value = 0
+  for flow_entry in node.flow_entries:
+    for action in flow_entry.outport_tags.values():
+      if action.type == type:
+        actual_value += 1
+  
+  return actual_value
+
+def get_tag_type_str(type):
+  # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
+  if type == 0:
+    return "GROUP_REUSE"
+  if type == 1:
+    return "GROUP"
+  if type == 2:
+    return "SINGLE"
+  if type == 3:
+    return "SINGLE_REUSE"
+  if type == 4:
+    return "MCAST_DST_ADDR"
+  if type == 5:
+    return "HOST_DST_ADDR"
+  
+  return "error in merger_test.get_tag_type_str() function"
+
+def check_correct_flow_matches(expected_matches,test_name):
+  
+  for node_id in expected_matches.keys():
+    for tuple in expected_matches[node_id]:
+      type = tuple[0]
+      expected_value = tuple[1]
+      actual_value = get_num_type_matches(node_id,type)
+      #print "MMMMMM RESULT ===== %s s%s should have %s match tags of type=%s, and has %s. "  %(test_name,node_id,expected_value,get_tag_type_str(type),actual_value)
+      if expected_value != actual_value:
+        tag_type_str = get_tag_type_str(type)
+        msg = "\n [TEST-ERROR] %s s%s should have %s match tags of type=%s, but has %s.  Exiting test. "  %(test_name,node_id,expected_value,tag_type_str,actual_value)
+        print msg
+        os._exit(0)
+      
+def check_correct_flow_actions(expected_actions,test_name):
+  
+  for node_id in expected_actions.keys():
+    for tuple in expected_actions[node_id]:
+      type = tuple[0]
+      expected_value = tuple[1]
+      actual_value = get_num_type_actions(node_id,type)
+      #print "AAAAAAA RESULT ===== %s s%s should have %s action tags of type=%s, and has %s. "  %(test_name,node_id,expected_value,get_tag_type_str(type),actual_value)
+      if expected_value != actual_value:
+        tag_type_str = get_tag_type_str(type)
+        msg = "\n [TEST-ERROR] %s s%s should have %s action tags of type=%s, but has %s.  Exiting test. "  %(test_name,node_id,expected_value,tag_type_str,actual_value)
+        print msg
+        os._exit(0)
+        
 def check_correct_num_flows(expected_num_flows,test_name):
   
   for node_id in expected_num_flows.keys():
@@ -55,10 +123,36 @@ def test_h6s10():
   multicast.compute_primary_trees(controller)
   multicast.create_install_merged_primary_tree_flows(controller)
   
+  
   expected_num_flows = {7:2,8:1,9:2,10:2,11:1,12:3,13:0,14:0,15:1,16:1}
+
   
   test_name = "test_h6s10()"
   check_correct_num_flows(expected_num_flows, test_name)
+  
+    # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
+  expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],    
+                      16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                      }
+  
+  check_correct_flow_matches(expected_matches, test_name)
+  
+  expected_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,2),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,3)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],    
+                    16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                    }
+  check_correct_flow_actions(expected_actions, test_name)
   
 def test_h6s10_4trees_order1():
   setup()
@@ -88,6 +182,28 @@ def test_h6s10_4trees_order1():
   check_correct_num_flows(expected_num_flows, test_name)
   
   #total = 17
+  expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,2),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],    
+                      16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                      }
+  
+  check_correct_flow_matches(expected_matches, test_name)
+  
+  expected_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,2),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,3),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,3),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,4)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],    
+                    16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                    }
+  check_correct_flow_actions(expected_actions, test_name)
 
 
 def test_h6s10_4trees_order2():
@@ -117,6 +233,29 @@ def test_h6s10_4trees_order2():
   
   #total = 17
 
+  expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,2),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],    
+                      16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                      }
+  
+  check_correct_flow_matches(expected_matches, test_name)
+  
+  expected_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,2),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,3),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,3),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,4)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],    
+                    16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]
+                    }
+  check_correct_flow_actions(expected_actions, test_name)
+
 def launch ():
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
@@ -125,7 +264,7 @@ def launch ():
     
   core.registerNew(appleseed.fault_tolerant_controller)
   
-  test_names = ["test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order1()"]
+  test_names = ["test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
   test_h6s10()
   test_h6s10_4trees_order1()
   test_h6s10_4trees_order2()
