@@ -40,9 +40,9 @@ mcast_ip_addr3 = IPAddr("10.12.12.12")
 mcast_mac_addr3 = EthAddr("12:12:12:12:12:12")
 dummy_mac_addr = EthAddr("99:99:99:99:99:99")
 
-#measure_pnts_file_str="measure-h6s10-1d-1p.csv"
+measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 #measure_pnts_file_str="measure-h9s6-2d-2p.csv"
-measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+#measure_pnts_file_str="measure-h6s9-1d-1p.csv"
 #measure_pnts_file_str ="measure-h4s8-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-3d-1p.csv"
 #measure_pnts_file_str="measure-h3s4-2d-1p.csv"
@@ -53,8 +53,8 @@ measure_pnts_file_str="measure-h6s9-1d-1p.csv"
 #measure_pnts_file_str="measure-h3s2-2p.csv"
 #measure_pnts_file_str="measure-h3s2-1p.csv"
 
-#mtree_file_str="mtree-h6s10-3t.csv"
-mtree_file_str="mtree-h6s9-2t.csv"
+mtree_file_str="mtree-h6s10-3t.csv"
+#mtree_file_str="mtree-h6s9-2t.csv"
 #mtree_file_str="mtree-h4s8-1t.csv"
 #mtree_file_str="mtree-h3s4-1t.csv"
 #mtree_file_str="mtree-h9s6-2t.csv"
@@ -73,6 +73,13 @@ new_tags = [EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("6
             EthAddr("66:66:66:66:66:27"),EthAddr("66:66:66:66:66:26"),EthAddr("66:66:66:66:66:25"),EthAddr("66:66:66:66:66:24"),EthAddr("66:66:66:66:66:23"),EthAddr("66:66:66:66:66:22"),
             EthAddr("66:66:66:66:66:21"),EthAddr("66:66:66:66:66:20"),EthAddr("66:66:66:66:66:19"),EthAddr("66:66:66:66:66:18"),EthAddr("66:66:66:66:66:17"),EthAddr("66:66:66:66:66:16"),
             EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("66:66:66:66:66:13"),EthAddr("66:66:66:66:66:12"),EthAddr("66:66:66:66:66:11"),EthAddr("66:66:66:66:66:10")]
+
+tree_default_tags = {1:EthAddr("AA:AA:AA:AA:AA:01"),2:EthAddr("AA:AA:AA:AA:AA:02"),3:EthAddr("AA:AA:AA:AA:AA:03"),4:EthAddr("AA:AA:AA:AA:AA:04"),5:EthAddr("AA:AA:AA:AA:AA:05"),6:EthAddr("AA:AA:AA:AA:AA:06"),
+                     7:EthAddr("AA:AA:AA:AA:AA:07"),8:EthAddr("AA:AA:AA:AA:AA:08"),9:EthAddr("AA:AA:AA:AA:AA:09"),10:EthAddr("AA:AA:AA:AA:AA:10"),11:EthAddr("AA:AA:AA:AA:AA:11"),12:EthAddr("AA:AA:AA:AA:AA:12"),
+                     13:EthAddr("AA:AA:AA:AA:AA:13"),14:EthAddr("AA:AA:AA:AA:AA:14"),15:EthAddr("AA:AA:AA:AA:AA:15"),16:EthAddr("AA:AA:AA:AA:AA:16"),17:EthAddr("AA:AA:AA:AA:AA:17"),18:EthAddr("AA:AA:AA:AA:AA:18"),
+                     19:EthAddr("AA:AA:AA:AA:AA:19"),20:EthAddr("AA:AA:AA:AA:AA:20"),21:EthAddr("AA:AA:AA:AA:AA:21"),22:EthAddr("AA:AA:AA:AA:AA:22"),23:EthAddr("AA:AA:AA:AA:AA:23"),24:EthAddr("AA:AA:AA:AA:AA:24"),
+                     25:EthAddr("AA:AA:AA:AA:AA:25"),26:EthAddr("AA:AA:AA:AA:AA:26"),27:EthAddr("AA:AA:AA:AA:AA:27"),28:EthAddr("AA:AA:AA:AA:AA:28"),29:EthAddr("AA:AA:AA:AA:AA:29"),30:EthAddr("AA:AA:AA:AA:AA:30"),
+                     31:EthAddr("AA:AA:AA:AA:AA:31"),32:EthAddr("AA:AA:AA:AA:AA:32"),33:EthAddr("AA:AA:AA:AA:AA:33"),34:EthAddr("AA:AA:AA:AA:AA:34"),35:EthAddr("AA:AA:AA:AA:AA:35"),36:EthAddr("AA:AA:AA:AA:AA:36"),}
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -487,7 +494,131 @@ def create_node_backup_tags(controller,btree_id,u_link,d_node,backup_edge):
       print "\t\t create new tag for backup"
       new_tag(btree_id, u_link_backup_tag, tag, d_link_backup_trees, backup_edge, d_node, d_link, outport,False)
 
-    
+
+def get_group_tag(trees,curr_tree_id,u_node,outport):  
+  """ Try to reuse a group_tag if possible.  Otherwise generate a new one. """
+  for tree_id in trees:
+    if not u_node.treeid_rule_map.has_key(tree_id):
+      continue
+    rule = u_node.treeid_rule_map[tree_id]
+    match_type = rule.match_tag.type
+    if match_type == TagType.GROUP_REUSE or match_type == TagType.GROUP:
+      return Tag(TagType.GROUP_REUSE, rule.match_tag.tag)
+   
+    if tree_id != curr_tree_id and rule.outport_tags.has_key(outport):    #see if a previously processed tree with the same downstream forwarding has an action we can reuse
+      return rule.outport_tags[outport]                                   # special case for 1-hop from sending host
+   
+  return Tag(TagType.GROUP, generate_new_tag())
+
+def get_single_tag(controller,tree_id,u_node,group_logic=False):  
+  """ Try to reuse a signle_tag if possible (i.e., when match at u_node using SINGLE).  Otherwise return the tree's default tag. 
+  
+      return action tag, match tag.  These values are different if u_node has group processing for tree_id
+  """
+  rule = u_node.treeid_rule_map[tree_id]
+  match_type = rule.match_tag.type
+  
+  reuse_action_tag = Tag(TagType.SINGLE_REUSE, rule.match_tag.tag)
+  if match_type == TagType.SINGLE_REUSE:
+    return reuse_action_tag,reuse_action_tag
+  
+  if match_type == TagType.SINGLE:
+    return reuse_action_tag,reuse_action_tag
+  
+  tree = get_tree(tree_id, controller)
+  if group_logic:
+    mcast_tag = Tag(TagType.MCAST_DST_ADDR,tree.mcast_address)
+    return mcast_tag,mcast_tag
+  
+  return tree.default_tag,tree.default_tag
+
+  
+def write_tag_upstream(trees, u_node,tag,outport,u2d_link):
+  
+  for tree_id in trees:
+    if not u_node.treeid_rule_map.has_key(tree_id):
+      continue
+    rule = u_node.treeid_rule_map[tree_id]
+    rule.add_outport_tag(outport,tag)
+  
+  u2d_link.add_tag(tag)
+  
+  
+def match_tag_downstream(trees, d_node,tag):
+  
+  if d_node.has_match_tag(tag):
+    return
+  
+  flow_entry = FlowEntry()
+  flow_entry.match_tag = tag
+  d_node.flow_entries.add(flow_entry)
+  
+  for tree_id in trees:
+    d_node.treeid_rule_map[tree_id] = flow_entry
+  
+def check_remove_stale_d_node_entry(in_trees,d_node,new_tag):
+  """ Needed if future Group Address Forwarding Tag overwrites an Old one"""
+  for tree_id in in_trees:
+    if d_node.treeid_rule_map.has_key(tree_id):
+      old_rule = d_node.treeid_rule_map[tree_id]
+      if old_rule.match_tag != new_tag:
+        del d_node.treeid_rule_map[tree_id]
+        d_node.flow_entries.discard(old_rule)
+        
+ 
+def tag_and_match(controller,tree_id,u_node,d_node,u2d_link):
+  """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
+  in_trees = u2d_link.trees
+  common_forwarding = True
+  for d_link in d_node.out_links:
+    out_trees = d_link.trees
+      
+    if len(in_trees.intersection(out_trees)) == 0: continue
+     
+    if not in_trees.issubset(out_trees):
+      common_forwarding = False
+  
+  outport = controller.adjacency[(u_node.id,d_node.id)]
+  if len(in_trees) > 1 and common_forwarding:
+    tag = get_group_tag(in_trees,tree_id, u_node,outport)
+    write_tag_upstream(in_trees, u_node,tag,outport,u2d_link)
+    check_remove_stale_d_node_entry(in_trees,d_node,tag)
+    match_tag_downstream(in_trees, d_node,tag)
+  else:
+    if len(in_trees) == 1:
+      action_tag,match_tag = get_single_tag(controller,tree_id, u_node)    #action_tag and match_tag are the same here
+      write_tag_upstream(in_trees, u_node,action_tag,outport,u2d_link)
+      match_tag_downstream(in_trees, d_node,match_tag)
+    elif len(in_trees) > 1:
+      action_tag,match_tag = get_single_tag(controller, tree_id, u_node,True)
+      trees = set()
+      trees.add(tree_id)
+      write_tag_upstream(trees, u_node,action_tag,outport,u2d_link)
+      match_tag_downstream(trees, d_node,match_tag)
+      
+def match_mcast_addr(controller,tree_id,d_node,u2d_link):
+  """ Special logic for node 1 hop downstream from root.  Create a match rule to match based on tree's destination address."""
+  flow_entry = FlowEntry()
+  root,mcast_dst = find_tree_root_and_mcast_addr(tree_id, controller)
+  tag = Tag(TagType.MCAST_DST_ADDR,mcast_dst)
+  flow_entry.match_tag = tag
+  d_node.treeid_rule_map[tree_id] = flow_entry
+  d_node.flow_entries.add(flow_entry)
+
+def action_write_terminal_host_addr(controller,current_tree_id,u_node,d_node,u2d_link):
+  """ Create action to write the address of the terminal host at u_node (L3 and L2 addresses)"""
+
+  outport = controller.adjacency[(u_node.id,d_node.id)]
+  tag = Tag(TagType.HOST_DST_ADDR, d_node.id)
+  
+  for tree_id in u2d_link.trees:    # note: tree_ids can be pointing to same FlowEntry, causing tag same (outport,tag) value to be written multiple times (this is safe to do)
+    if not u_node.treeid_rule_map.has_key(tree_id):
+      continue
+    rule = u_node.treeid_rule_map[tree_id]
+    rule.add_outport_tag(outport,tag)
+  
+  u2d_link.add_tag(tag)
+  
 def create_single_tree_tagging_indices(controller,tree_id,root_node):
   """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules. """
   print "\nTREE %s-----------------------------------------------------------------" %(tree_id)
@@ -495,23 +626,28 @@ def create_single_tree_tagging_indices(controller,tree_id,root_node):
   q.put(root_node)
   visited = set()
   while not q.empty():
-    node = q.get()
-    visited.add(node)
-    print "At n%s" %(node.id)
+    u_node = q.get()
+    visited.add(u_node)
+    print "At n%s" %(u_node.id)
     
-    for d_link in node.out_links:
-      if not tree_id in d_link.trees: continue
-      d_node = d_link.downstream_node
-      if d_node.is_host or d_node in visited: continue
+    for u2d_link in u_node.out_links:
+      if not tree_id in u2d_link.trees: continue
+      d_node = u2d_link.downstream_node
+      if d_node in visited: continue
+      if not d_node.is_host:
+        q.put(d_node)
       
-      q.put(d_node)
+      print "\t- visiting s%s" %(d_node.id)
       
-      if controller.merger_optimization == Mode.MERGER_DEPRACATED:
-        depracted_create_node_tags(controller,tree_id, d_link, d_node)
-      elif controller.merger_optimization == Mode.MERGER:
-        create_node_tags(controller,tree_id, d_link, d_node)
-      else:
-        raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
+      
+      if controller.merger_optimization == Mode.MERGER:
+        if u_node.is_host:
+          match_mcast_addr(controller,tree_id,d_node,u2d_link)
+        elif d_node.is_host:
+          action_write_terminal_host_addr(controller, tree_id, u_node, d_node, u2d_link)
+        else:
+          tag_and_match(controller,tree_id,u_node,d_node,u2d_link)
+      
   print "----------------------------------------------------------------------------\n"
   
 def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge):
@@ -552,15 +688,49 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
         create_node_backup_tags(controller,btree_id, d_link, d_node,backup_edge)
       else:
         raise appleseed.AppleseedError("No relevant optimization strategy set for backup trees..  Exiting.")
+      
   print "----------------------------------------------------------------------------\n"  
 
 def create_tag_indices(controller):
   """ For each tree do a BFS. """  
+  print controller.adjacency
   for tree in controller.primary_trees:
     root_id = find_node_id(tree.root_ip_address)
     root_node = nodes[root_id]
     create_single_tree_tagging_indices(controller,tree.id,root_node)
- 
+  
+  
+  print_flow_entries()
+  print "Total Number of Flows = %s" %(total_num_flows())
+  print "exit for debugging"
+  os._exit(0)
+
+
+def total_num_flows():
+  total_flows = 0
+  for node in nodes.values():
+    if not node.is_host:
+      total_flows += len(node.flow_entries)
+  return total_flows
+
+def print_node_flow_entries(node,skip_if_empty=False):
+    
+    if skip_if_empty and len(node.flow_entries) == 0:
+      return
+    
+    out_str = "\nS%s Flow Entries ----------------------------------------------------------------------------------------------------\n" %(node.id)
+    for flow in node.flow_entries:
+      out_str += "\t %s\n" %(flow)
+    out_str += "--------------------------------------------------------------------------------------------------------------------" 
+    print out_str
+    
+def print_flow_entries():
+  
+  for node in nodes.values():
+    if not node.is_host:
+      print_node_flow_entries(node,True)
+
+      
 def find_backup_edges(controller):
   """ Create and return a list of all backup edges"""
   backup_map = {}
@@ -1007,6 +1177,7 @@ class MulticastTree ():
     self.adjacency = kwargs["adjacency"]
     self.controller = kwargs["controller"]
     self.id = find_node_id(self.root_ip_address)
+    self.default_tag = Tag(TagType.SINGLE, tree_default_tags[self.id])
     
   def find_ip_address(self,id):
     
@@ -1277,7 +1448,7 @@ class Edge ():
     self.upstream_node = None
     self.downstream_node = None
     self.trees = set()
-    self.tag = None
+    self.tags = set()     # list of tags written or reused for packets sent along this link
     
     self.backup_trees = {}      # backup_edge --> set(tree_id2,tree_id2,...)
     self.backup_tags = {}     # backup_edge --> tag 
@@ -1289,7 +1460,16 @@ class Edge ():
       btrees = set()
       btrees.add(tree_id)
       self.backup_trees[backup_edge] = btrees
-    
+  
+  def has_tag(self,tag):
+    for action_tag in self.tags:
+      if action_tag == tag:
+        return True
+    return False
+  
+  def add_tag(self,tag):
+    if not self.has_tag(tag):
+      self.tags.add(tag)
     
   def print_if_marked(self):
     """ Only prints output if the Edge is used by a tree of backup tree"""
@@ -1316,7 +1496,9 @@ class Edge ():
       print "\t (%s,%s), %s " %(self.upstream_node.id,self.downstream_node.id,tree_strs)
     else:
       print "\t (%s,%s), P=%s, B=%s" %(self.upstream_node.id,self.downstream_node.id,tree_strs,backup_strs)
-    
+   
+  def end_points_str(self):
+    return "(%s,%s)" %(self.upstream_node.id,self.downstream_node.id)
   
   def __str__(self):
     tree_strs = []
@@ -1343,8 +1525,76 @@ class Edge ():
   
   def __repr__(self):
     return self.__str__()    
+
+TagType = enum(GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5)    
+
+class Tag ():
+  
+  def __init__(self,type,tag=None):
+    self.tag = tag
+    self.type = type    #TagType: SINGLE is for tree specific address, MCAST_DST_ADDR is for matching using destination address, HOST_DST_ADDR is for rewritng host dest addres
     
+  def __eq__(self,other):
+    if self.type == other.type and self.tag == other.tag:
+      return True
+    return False
+  
+  def __hash__(self):
+    #print "\t\t\t\t\t\t\t\t\t\t\t \t\t\t%s= %s" %(self,hash(self.type) + hash(self.tag))
+    return hash(self.type) + hash(self.tag)
+  
+  def __str__(self):
+    if self.type == TagType.GROUP_REUSE:
+       return "(Group_Reuse,%s)" %(self.tag)
+    if self.type == TagType.GROUP:
+       return "(Group,%s)" %(self.tag)
+    if self.type == TagType.SINGLE:
+       return "(Single,%s)" %(self.tag)
+    if self.type == TagType.SINGLE_REUSE:
+       return "(Single_Reuse,%s)" %(self.tag)
+    if self.type == TagType.MCAST_DST_ADDR:
+       return "(Mcast_Dst,%s)" %(self.tag)
+    if self.type == TagType.HOST_DST_ADDR:
+       return "(Host_Dst,%s)" %(self.tag)
+     
 class Node ():
+  
+  def __init__(self,id,is_host):
+    self.id = id
+    self.is_host = is_host
+    self.in_links = set()
+    self.out_links = set()
+    
+    self.treeid_rule_map = {}  # tree_id --> FlowEntry
+    self.flow_entries = set()  
+  
+  def has_match_tag(self,match_tag):
+    for flow_entry in self.flow_entries:
+      if flow_entry.match_tag == match_tag:
+        return True
+    return False
+  
+class FlowEntry(): 
+
+  def __init__(self):
+    self.match_tag = None   # Tag
+    self.outport_tags = {}  # outport -> Tag  (tag can be None if we are reusing a tag, host_id if we need to write the host_id, of )
+  
+  def add_outport_tag(self,outport,tag):
+    if self.outport_tags.has_key(outport):
+      if self.outport_tags[outport] == tag:
+        return
+    self.outport_tags[outport] = tag
+    
+  def __str__(self):
+    out_str = "M=%s, A={" %(self.match_tag)
+    for outport in self.outport_tags.keys():
+      tag = self.outport_tags[outport]
+      out_str += "%s:%s," %(outport,tag)
+    out_str += "}"
+    return out_str
+    
+class DepracatedNode ():
   
   def __init__(self,id,is_host):
     self.id = id
