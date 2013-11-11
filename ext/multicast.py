@@ -597,9 +597,6 @@ def write_tag_upstream(trees, u_node,tag,outport,u2d_link,group_logic=False):
   
 def match_tag_downstream(trees, d_node,tag):
   
-#  if d_node.has_match_tag(tag):
-#    return
-  
   flow_entry = FlowEntry()
   flow_entry.match_tag = tag
   
@@ -649,11 +646,6 @@ def has_group_forwarding(controller,in_trees,d_node):
     for tree in curr_share:
       shared_trees.add(tree)
   
-  
-#  if len(in_trees) > 1:
-#    return True,shared_trees    # not sure about returning shared trees
-  
- 
   non_shared_trees = set()
   for s_tree in shared_trees:
     s_outports = find_outports(controller, s_tree, d_node)
@@ -675,21 +667,6 @@ def has_group_forwarding(controller,in_trees,d_node):
   
   return True,shared_trees
 
-#  for d_link in d_node.out_links:
-#    out_trees = d_link.trees
-#      
-#    #if len(shared_trees) > 0 and len(shared_trees.intersection(out_trees)) > 0 and len(in_trees.intersection(out_trees)) == 0: #shared_trees should only use the outports used by in-trees
-#    #  common_forwarding = False 
-#    if len(non_shared_trees.intersection(out_trees)) > 0: 
-#      common_forwarding = False 
-#    if len(in_trees.intersection(out_trees)) == 0: 
-#      for tree in out_trees: non_shared_trees.add(tree)
-#      continue
-#    if not in_trees.issubset(out_trees) or out_trees != shared_trees:   # all out-links used by in_trees have same out-trees for each such link
-#      common_forwarding = False
-#    shared_trees = out_trees
-      
-#  for d_link in d_node.out_links:
 def tag_and_match(controller,tree_id,u_node,d_node,u2d_link):
   """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
   in_trees = u2d_link.trees
@@ -703,13 +680,6 @@ def tag_and_match(controller,tree_id,u_node,d_node,u2d_link):
     write_tag_upstream(in_trees, u_node,action_tag,outport,u2d_link,len(in_trees) != 1)
     check_remove_stale_d_node_entry(in_trees,d_node,match_tag)
     match_tag_downstream(in_trees, d_node,match_tag)
-#  if len(in_trees) > 1 and common_forwarding:
-#    tag = old_get_group_tag(in_trees,tree_id, u_node,outport)
-#    if u_node.id == 10 and d_node.id == 11:
-#      print "+++++++ TAG IS %s " %(tag)
-#    write_tag_upstream(in_trees, u_node,tag,outport,u2d_link,True)
-#    check_remove_stale_d_node_entry(in_trees,d_node,tag)
-#    match_tag_downstream(in_trees, d_node,tag)    
   else:
     if len(in_trees) == 1:
       action_tag,match_tag = get_single_tag(controller,tree_id, u_node)    #action_tag and match_tag are the same here
