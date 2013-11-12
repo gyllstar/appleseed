@@ -5,7 +5,6 @@
 """
 
 
-import unittest
 import appleseed,multicast
 from multicast import TagType
 from pox.lib.addresses import IPAddr,EthAddr
@@ -139,7 +138,8 @@ def check_correct_backup_flow_actions(expected_actions,backup_edge,test_name):
       if expected_value != actual_value:
         tag_type_str = get_tag_type_str(type)
         msg = "\n [TEST-ERROR] %s, Backup trees for l=%s: s%s should have %s action tags of type=%s, but has %s.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,tag_type_str,actual_value)
-        print msg      
+        print msg   
+        os.exit(0)   
   
 def check_correct_num_placeholder_backup_flows(expected_placeholders,backup_edge,test_name):
   
@@ -148,7 +148,8 @@ def check_correct_num_placeholder_backup_flows(expected_placeholders,backup_edge
     actual_value = get_num_placeholder_flows(node_id,backup_edge)
     if expected_value != actual_value:
       msg = "\n [TEST-ERROR]  %s, Backup trees for l=%s: s%s should have %s placeholder flows but has %s placeholder flows.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,actual_value)
-      print msg    
+      print msg   
+      os.exit(0) 
       
 def check_correct_flow_actions(expected_actions,test_name):
   
@@ -192,11 +193,17 @@ def check_correct_num_backup_flows(expected_num_flows,backup_edge,test_name):
       os._exit(0)      
 
 
-def print_successful_test_results(test_names):
+def print_successful_test_results(baseline_test_names,merger_test_names):
   
   print "\n\n************************************************** THESE TESTS ALL COMPLETED CORRECTLY **************************************************************" 
   cnt = 0
-  for test_name in test_names:
+  print "**** BASELINE TESTS \t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t ****"
+  for test_name in baseline_test_names:
+    cnt+=1
+    print "**** \t\t (%s)  %s  \t\t\t\t\t\t\t\t\t\t\t ****" %(cnt,test_name)
+  cnt = 0
+  print "**** MERGER TESTS \t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t ****"
+  for test_name in merger_test_names:
     cnt+=1
     print "**** \t\t (%s)  %s  \t\t\t\t\t\t\t\t\t\t\t\t ****" %(cnt,test_name)
   print "*****************************************************************************************************************************************************"
@@ -209,6 +216,7 @@ def test_h6s9():
   multicast.mtree_file_str="mtree-h6s9-2t.csv"
   multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
   controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.MERGER
   controller.adjacency = h6s9_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
@@ -250,6 +258,7 @@ def test_backups_h6s9_3trees():
   multicast.mtree_file_str="mtree-h6s9-2t.csv"
   multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
   controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.MERGER
   controller.adjacency = h6s9_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
   
@@ -341,8 +350,8 @@ def test_backups_h6s9_3trees():
     check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
   
   
-  print "OS EXIT AT test_backups_h6s9_3trees() "
-  os._exit(0)
+  #print "OS EXIT AT test_backups_h6s9_3trees() "
+  #os._exit(0)
 
 def test_h6s10():
   
@@ -353,6 +362,7 @@ def test_h6s10():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 
   controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -400,6 +410,7 @@ def test_h6s10_4trees_order1():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
   
   controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -457,6 +468,7 @@ def test_h6s10_4trees_order2():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
   
   controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -501,6 +513,101 @@ def test_h6s10_4trees_order2():
                     }
   check_correct_flow_actions(expected_actions, test_name)
 
+
+def baseline_check_nodes_to_signal(expected_result,actual_result,tree_id,backup_edge,test_name):
+
+  if expected_result != actual_result:
+    msg = "\n [TEST-ERROR] %s, Backup tree (B%s) for l=%s: should have nodes-to-signal = %s but has nodes-to-signal = %s.  Exiting test. "  %(test_name,tree_id,backup_edge,expected_result,actual_result)
+    os.exit(0)
+    
+def test_baseline_bottom_up_signal_simple_path():
+  
+  setup()
+  controller = appleseed.fault_tolerant_controller()
+  #controller.adjacency = h6s10_adjancency
+  controller.merger_optimization = multicast.Mode.BASELINE
+
+  #core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
+
+  # just a simple path
+  primary_edges = [(1,2),(2,3),(3,4),(4,5),(5,6)]
+  backup_edges = [(1,2),(2,7),(7,8),(8,5),(5,6)]
+
+  
+  root = IPAddr("10.0.0.1")
+  terminals = [IPAddr("10.0.0.6")]
+  data = {"edges":primary_edges,"mcast_address":IPAddr("10.0.0.6"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
+  primary = multicast.PrimaryTree(**data)
+  
+
+  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(2,3),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
+  backup = multicast.BackupTree(**data)
+  
+  primary.backup_trees.append(backup)
+
+  expected_result = [8,7,2]
+  
+  test_name = "test_baseline_bottom_up_signal_simple_path()"
+  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (2,3), test_name)
+
+def test_baseline_bottom_up_signal_trees1():
+  
+  setup()
+  controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.BASELINE
+  
+  # just a simple path
+  primary_edges =  [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
+  backup_edges = [(1,5),(5,11),(11,12),(11,7),(7,2),(12,10),(12,9),(10,4),(9,3)]
+
+  
+  root = IPAddr("10.0.0.1")
+  terminals = [IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4")]
+  data = {"edges":primary_edges,"mcast_address":IPAddr("10.10.10.10"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
+  primary = multicast.PrimaryTree(**data)
+  
+
+  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
+  backup = multicast.BackupTree(**data)
+  
+  primary.backup_trees.append(backup)
+
+  #result = backup.compute_nodes_to_signal((2,3))
+  
+  expected_result = [12,11,5]
+  
+  test_name = "test_baseline_bottom_up_signal_trees1"
+  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (1,2), test_name)
+
+    
+def test_baseline_bottom_up_signal_trees2():
+  
+  setup()
+  controller = appleseed.fault_tolerant_controller()
+  controller.merger_optimization = multicast.Mode.BASELINE
+  
+  # just a simple path
+  primary_edges = [(1,2),(2,3),(3,4),(3,5),(4,6),(5,7),(5,8)]
+  backup_edges = [(1,9),(9,10),(9,4),(10,7),(10,8),(4,6)]
+
+  
+  root = IPAddr("10.0.0.1")
+  terminals = [IPAddr("10.0.0.6"),IPAddr("10.0.0.7"),IPAddr("10.0.0.8")]
+  data = {"edges":primary_edges,"mcast_address":IPAddr("10.10.10.10"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
+  primary = multicast.PrimaryTree(**data)
+  
+
+  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
+  backup = multicast.BackupTree(**data)
+  
+  primary.backup_trees.append(backup)
+
+  
+  expected_result = [10,9,1]
+  
+  test_name = "test_baseline_bottom_up_signal_trees2"
+  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (1,2), test_name)
+
 def launch ():
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
@@ -509,13 +616,19 @@ def launch ():
     
   core.registerNew(appleseed.fault_tolerant_controller)
   
-  test_names = ["test_backups_h6s9_3trees()","test_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
+  
+  baseline_test_names = ["test_baseline_bottom_up_signal_simple_path","test_baseline_bottom_up_signal_trees1()","test_baseline_bottom_up_signal_trees2()",]
+  test_baseline_bottom_up_signal_simple_path()
+  test_baseline_bottom_up_signal_trees1()
+  test_baseline_bottom_up_signal_trees2()
+  
+  merger_test_names = ["test_backups_h6s9_3trees()","test_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
   test_backups_h6s9_3trees()
   test_h6s9()
   test_h6s10()
   test_h6s10_4trees_order1()
   test_h6s10_4trees_order2()
-  print_successful_test_results(test_names)
+  print_successful_test_results(baseline_test_names,merger_test_names)
   
   
   os._exit(0)
