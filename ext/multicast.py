@@ -1612,9 +1612,9 @@ class PrimaryTree (MulticastTree):
         else:
           self.install_nonleaf_flow(id)
     
-  def cleanup_stale_flows(self):
+  def garbage_collect_stale_flows(self):
     """ Remove primary tree flows made obsolete because the backup tree was activated."""
-    msg = "Primary.cleanup_stale_flows() is not yet implemented"
+    msg = "Primary.garbage_collect_stale_flows() is not yet implemented"
     log.info(msg)
     
   def __str__(self):
@@ -1674,13 +1674,16 @@ class BackupTree (MulticastTree):
   
   def preinstall_baseline_backups(self):
     """ Used by the Proactive Algorithm to preinstall_baseline_backups flow entries.  Signal all nodes in 'self.nodes_to_signal' except the most upstream node"""
+    log.debug("Baseline Algorithm: Preinstalling backup tree B%s for l=%s" %(self.id,self.backup_edge))
     for node_id in self.nodes_to_signal:
       if self.is_leaf_node(node_id):
+        log.debug("Baseline Algorithm: Preinstalling flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
         self.install_leaf_flow(node_id)
       else:
         is_most_upstream = (node_id == self.nodes_to_signal[-1])
         if is_most_upstream:
           continue
+        log.debug("Baseline Algorithm: Preinstalling flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
         self.install_nonleaf_flow(node_id)
         
   def reactive_install(self):
@@ -1696,10 +1699,17 @@ class BackupTree (MulticastTree):
     """ Baseline Algorithm for recovery."""
     if self.controller.backup_tree_mode == BackupMode.REACTIVE:
       self.reactive_install()
-    elif self.controller.backup_tree_mode == BackupMode.PROACIVE:    # only need signal the most upstream node
+    elif self.controller.backup_tree_mode == BackupMode.PROACTIVE:    # only need signal the most upstream node
       most_upstream_node = self.nodes_to_signal[-1]
       is_most_upstream = True
-      self.install_nonleaf_flow(node_id,is_most_upstream)
+      log.debug("Baseline Algorithm Proactive Mode: Activating backup tree B%s for l=%s by signaling s%s" %(self.id,self.backup_edge,most_upstream_node))
+      self.install_nonleaf_flow(most_upstream_node,is_most_upstream)
+    
+    msg = "============== Backup Tree Activated =============="
+    log.info(msg)
+    print msg
+    
+    self.primary_tree.garbage_collect_stale_flows()
 
   def activate_merger_backups(self):
     """ Baseline Algorithm for recovery."""    
@@ -1719,21 +1729,6 @@ class BackupTree (MulticastTree):
       raise appleseed.AppleseedError("No implementation of backup tree activation for MERGER_DEPRACATED mode.")
     else:
       raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
-    
-    if self.controller.backup_tree_mode == BackupMode.REACTIVE:
-      self.reactive_install()
-    elif self.controller.backup_tree_mode == BackupMode.PROACIVE:    # only need signal the most upstream node
-      most_upstream_node = self.nodes_to_signal[-1]
-      is_most_upstream = True
-      self.install_nonleaf_flow(node_id,is_most_upstream)
-    
-    msg = "============== Backup Tree Activated =============="
-    log.info(msg)
-    print msg
-    
-    self.primary_tree.cleanup_stale_flows()
-    # TODO: clean up == delete old flows
-    
     
     
   def __str__(self):
