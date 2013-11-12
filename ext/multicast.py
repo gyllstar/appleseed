@@ -249,10 +249,6 @@ def mark_primary_tree_edges(controller):
   for tree in controller.primary_trees:
     for edge_id in tree.edges:
       edge = edges[edge_id]
-      # Short-term test, remove for correct behavior
-      #if tree.id == 1 and (edge_id == (8,9) or edge_id == (9,2)):
-      #  print "For Testing Skipping Marking %s with T%s even though T%s uses %s." %(edge_id,tree.id,tree.id,edge_id)
-      #  continue
       edge.trees.add(tree.id)
       
 def mark_backup_tree_edges(controller):
@@ -264,20 +260,6 @@ def mark_backup_tree_edges(controller):
         edge.add_backup_tree(btree.id,btree.backup_edge)
    
 
-def depracated_full_overlap(tree_id,in_tag,in_set,d_node,d_link,outport):
-  """ Check if full overlap downstream and if so apply keep_tag """   
-  if in_tag == None: return False
-  if in_set == d_link.trees and d_link.value == None:  # only need to process for one of the trees using d_link
-    print "\t\t Full overlap at n%s: handling T%s at %s:  %s" %(d_node.id,tree_id,d_link,in_set)
-    d_link.value = in_tag
-    d_node.update_keep_tags(d_link.trees,in_tag,outport)
-    return True
-  elif in_set == d_link.trees:
-    print "\t\t Full overlap at n%s for T%s link %s: %s, but skipping because already updated indices when processing previous trees." %(d_node.id,tree_id,d_link,in_set)
-    return True
-  return False
- 
- 
 def tag_upstream(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
   """ Try to see if we can apply the value at 'u'.  This is messy!!  """
   if not u_node.is_host and len(in_set) == 1 and len(d_link.trees) > 1:
@@ -321,77 +303,7 @@ def tag_upstream(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
 def generate_new_tag():
   return new_tags.pop()
 
-def depracted_new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
-  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False.  
-  
-      Reuse a new value from another out-link at 'd' if the two links share the same set of merged trees.
-  """  
-  if len(d_link.trees) == 1: return False
-  if d_link.value != None:    # because a tree processed earlier has already handled the tagging
-    print "\t\t New merge set at n%s: %s already has a value (%s) for the new merge set (%s) so reusing this value. " %(d_node.id,d_link,d_link.value,d_link.trees) 
-    return True  
-  
-  #if tag_upstream(tree_id, u_node, u_link, in_tag, in_set, d_node, d_link, outport):    # may want to skip this because it's ugly
-  #  return True
-  
-  # (2) since we can't apply value upstream, we have to add a new value at 'd'
-  has_tree_set_new_tag, reused_new_tag = d_node.has_tree_set_new_tag(d_link.trees)
-  if has_tree_set_new_tag:
-  #if d_node.new_tags.has_key(d_link.trees_hash_key): # already processed a link with merge set S so just reusing this value
-    print "\t\t New merge set at n%s: another out-link at n%s has the same set of trees value = %s for %s" %(d_node.id,d_node.id,reused_new_tag,d_link)
-    d_link.value = reused_new_tag
-    d_node.update_new_tags(d_link.trees,d_link.value,outport)
-  else:
-    print "\t\t New merge set at n%s: generate new value T%s,%s" %(d_node.id,tree_id,d_link) 
-    new_tag = generate_new_tag()
-    d_node.update_new_tags(d_link.trees,new_tag,outport)
-    d_link.value = new_tag
-    
-  return True
 
-def new_merge_set(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
-  """ Check a new merge set is formed.  If yes, process and return True.  Otherwise return False.
-  
-      We do NOT reuse tags from other out-links.
-   """  
-  if d_link.value != None:    # because a tree processed earlier has already handled the tagging
-    print "\t\t New merge set at n%s: %s already has a value (%s) for the new merge set (%s) so reusing this value. " %(d_node.id,d_link,d_link.value,d_link.trees) 
-    return True  
-  
-  #if tag_upstream(tree_id, u_node, u_link, in_tag, in_set, d_node, d_link, outport):    # may want to skip this because it's ugly
-  #  return True
-  
-  print "\t\t New merge set at n%s: generate new value T%s,%s" %(d_node.id,tree_id,d_link) 
-  new_tag = generate_new_tag()
-  d_node.update_new_tags(d_link.trees,new_tag,outport)
-  d_link.value = new_tag
-    
-  return True
-  
-def depracated_no_merge(tree_id,d_node,d_link,outport):
-  """ Process a single flow """ 
-  print "\t\t no merge: T%s at %s" %(tree_id,d_link) 
-  d_node.update_no_tags(tree_id,outport)
-  
-def depracted_create_node_tags(controller,tree_id,u_link,d_node):
-  """ u --> {d1,d2, ...}.  We are at 'u' and looking at the outlink of each d1, d2, ... """
-  for d_link in d_node.out_links:
-    if not tree_id in d_link.trees: continue
-    print "\t (%s,%s) vs. (%s,%s)" %(u_link.upstream_node.id,u_link.downstream_node.id,d_link.upstream_node.id,d_link.downstream_node.id)
-    
-    outport = controller.adjacency[(d_link.upstream_node.id,d_link.downstream_node.id)]
-    if len(u_link.trees) > 1 and depracated_full_overlap(tree_id,u_link.value,u_link.trees,d_node,d_link,outport): 
-      continue
-    
-    # if we've made it here then we do not have a depracated_full_overlap case so need to add an existing value the remove list
-    if u_link.value != None:
-      d_node.update_remove_tags(tree_id,u_link.value,outport)
-      print "\t\t Remove value at n%s for %s and old-set=%s" %(d_node.id,d_link,u_link.trees)
-      
-    if depracted_new_merge_set(tree_id,u_link.upstream_node,u_link,u_link.value,u_link.trees,d_node,d_link,outport): 
-      continue
-    else:
-      depracated_no_merge(tree_id,d_node,d_link,outport)
       
 def create_node_tags(controller,tree_id,u_link,d_node):
   """ We are at 'd_node' comparing each of its outlinks to u_link in order to set tagging rules at d_node """
@@ -417,38 +329,6 @@ def create_node_tags(controller,tree_id,u_link,d_node):
       raise appleseedError(out)
       depracated_no_merge(tree_id,d_node,d_link,outport)
       
-def keep_tag(btree_id,tag,backup_trees,backup_edge,d_node,d_link,outport,primary_tree_overlap=True):
-  """ Use the value of the primary tree using d_link. """
-  if not d_link.backup_tags.has_key(backup_edge): # only need to process for one of the backup trees using d_link
-    if primary_tree_overlap:
-      print "\t\t Processed B%s at s%s, adding a keep_tag for d_link=%s, reusing primary_tree value. " %(btree_id,d_node.id,d_link)
-    else:
-      print "\t\t Processed B%s at s%s, adding a keep value for d_link=%s but no primary tree overlap on this edge.  " %(btree_id,d_node.id,d_link)
-    d_link.backup_tags[backup_edge] = tag
-    d_node.update_keep_backup_tags(backup_trees,backup_edge,tag,outport)
-  else:
-    if primary_tree_overlap:
-      print "\t\t Processed B%s at s%s, keep_tag that reuses the primary_tree value at d_link=%s already processed by another tree so skipping."  %(btree_id,d_node.id,d_link)
-    else:
-      print "\t\t Processed B%s at s%s, skipped adding a keep value for d_link=%s where there is no primary tree overlap on this edge because already processed by another tree.  " %(btree_id,d_node.id,d_link)
-      
-def new_tag(btree_id,old_tag,tag,backup_trees,backup_edge,d_node,d_link,outport,primary_tree_overlap=True):
-  """ Create a new value index equal to 'value' """
-  if not d_link.backup_tags.has_key(backup_edge): # only need to process for one of the backup trees using d_link
-    if primary_tree_overlap:
-      print "\t\t Processed B%s at s%s, adding a new_tag for d_link=%s, equal to primary_tree value. " %(btree_id,d_node.id,d_link)
-    else:
-      print "\t\t Processed B%s at s%s, adding a new_tag for d_link=%s, NOT equal to primary_tree value because no overlap on this edge. " %(btree_id,d_node.id,d_link)
-    d_link.backup_tags[backup_edge] = tag
-    d_node.update_new_backup_tags(backup_trees,backup_edge,tag,outport)
-    if old_tag != None:
-      d_node.update_remove_backup_tags(backup_trees,backup_edge,old_tag,outport)
-  else:
-    if primary_tree_overlap:
-      print "\t\t Processed B%s at s%s, new_tag for d_link=%s, equal to primary_tree value, already processed by another tree so skipping."  %(btree_id,d_node.id,d_link)
-    else:
-      print "\t\t Processed B%s at s%s, skipped adding a new_tag for d_link=%s, NOT equal to primary_tree value because already processed by another tree. " %(btree_id,d_node.id,d_link)
-    
   
 def create_node_backup_tags(controller,btree_id,u_link,d_node,backup_edge):
   """  We are at 'd_node' comparing each of its outlinks to u_link in order to set tagging rules at d_node. """
@@ -495,21 +375,44 @@ def create_node_backup_tags(controller,btree_id,u_link,d_node,backup_edge):
       print "\t\t create new value for backup"
       new_tag(btree_id, u_link_backup_tag, tag, d_link_backup_trees, backup_edge, d_node, d_link, outport,False)
 
-def old_get_group_tag(trees,curr_tree_id,u_node,outport):  
-  """ Try to reuse a group_tag if possible.  Otherwise generate a new one. """
-  for tree_id in trees:
-    if not u_node.treeid_rule_map.has_key(tree_id):
+def get_backup_group_tag(controller,trees,curr_bak_tree_id,u_node,outport,shared_bak_trees,d_node,backup_edge):  
+  """ (1) Check if flow entry exists at d_node for one of the shared_bak_trees (those with same outport as current tree).  
+      (2) Try to reuse a group_tag at u_node if possible.  
+      (3) If none of this works, generate a new one. """
+
+  # (1) look downstream existing flow_entry using GROUP tag
+  u_action_tag = None
+  d_match_tag= None
+  for stree_id in shared_bak_trees:
+    if not d_node.has_backup_treeid_rule(backup_edge,stree_id):
       continue
-    rule = u_node.treeid_rule_map[tree_id]
-    match_type = rule.match_tag.type
-    if match_type == TagType.GROUP_REUSE or match_type == TagType.GROUP:
-      return Tag(TagType.GROUP_REUSE, rule.match_tag.value)
-    
-    if tree_id != curr_tree_id and rule.outport_tags.has_key(outport):    #see if a previously processed tree with the same downstream forwarding has an action we can reuse
-      return rule.outport_tags[outport]                                   # special case for 1-hop from sending host
-    
-  return Tag(TagType.GROUP, generate_new_tag())
- 
+    d_rule = d_node.backup_treeid_rule_map[backup_edge][stree_id]
+    d_match_type = d_rule.match_tag.type
+    if d_match_type == TagType.GROUP_REUSE or d_match_type == TagType.GROUP:
+      u_action_tag = Tag(TagType.GROUP, d_rule.match_tag.value)
+      d_match_tag = Tag(d_match_type, d_rule.match_tag.value) 
+      u_rule = u_node.backup_treeid_rule_map[backup_edge][curr_bak_tree_id]
+      if u_rule.match_tag.type != TagType.MCAST_DST_ADDR and u_rule.match_tag.value == d_rule.match_tag.value:
+        u_action_tag.type = TagType.GROUP_REUSE
+      return u_action_tag,d_match_tag
+  
+  for tree_id in trees:
+    if not u_node.has_backup_treeid_rule(backup_edge,tree_id):
+      continue
+    u_rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
+    u_match_type = u_rule.match_tag.type
+    if u_match_type == TagType.GROUP_REUSE or u_match_type == TagType.GROUP:   
+      return Tag(TagType.GROUP_REUSE, u_rule.match_tag.value),Tag(TagType.GROUP_REUSE, u_rule.match_tag.value)
+   
+    if tree_id != curr_bak_tree_id and u_rule.outport_tags.has_key(outport):    #see if a previously processed tree with the same downstream forwarding has an action we can reuse
+      return u_rule.outport_tags[outport],u_rule.outport_tags[outport]                                  # special case for 1-hop from sending host 
+  
+  # single tree merging with a new group
+  if len(trees) == 1:
+    return get_single_backup_tag(controller,curr_bak_tree_id, u_node,backup_edge)
+                     
+  new_tag = Tag(TagType.GROUP, generate_new_tag())
+  return new_tag,new_tag
 
 def get_group_tag(controller,trees,curr_tree_id,u_node,outport,shared_trees,d_node):  
   """ (1) Check if flow entry exists at d_node for one of the shared_trees (those with same outport as current tree).  
@@ -550,6 +453,33 @@ def get_group_tag(controller,trees,curr_tree_id,u_node,outport,shared_trees,d_no
   new_tag = Tag(TagType.GROUP, generate_new_tag())
   return new_tag,new_tag
 
+
+def get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=False):  
+  """ Try to reuse a signle_tag if possible (i.e., when match at u_node using SINGLE).  Otherwise return the tree's default value. 
+  
+      return action value, match value.  These values are different if u_node has group processing for tree_id
+  """
+  rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
+  match_type = rule.match_tag.type
+  
+  reuse_action_tag = Tag(TagType.SINGLE_REUSE, rule.match_tag.value)
+  if match_type == TagType.SINGLE_REUSE:
+    return reuse_action_tag,reuse_action_tag
+  
+  if match_type == TagType.SINGLE:
+    return reuse_action_tag,reuse_action_tag
+  
+  tree = get_tree(tree_id, controller)
+  
+  if match_type == TagType.MCAST_DST_ADDR:
+    return tree.default_tag,tree.default_tag
+  
+  if group_logic:
+    mcast_tag = Tag(TagType.MCAST_DST_ADDR,tree.mcast_address)
+    return mcast_tag,mcast_tag
+  
+  return tree.default_tag,tree.default_tag
+
 def get_single_tag(controller,tree_id,u_node,group_logic=False):  
   """ Try to reuse a signle_tag if possible (i.e., when match at u_node using SINGLE).  Otherwise return the tree's default value. 
   
@@ -577,6 +507,23 @@ def get_single_tag(controller,tree_id,u_node,group_logic=False):
   return tree.default_tag,tree.default_tag
 
   
+def write_backup_tag_upstream(bak_trees, u_node,tag,outport,u2d_link,backup_edge,group_logic=False):
+  
+  for tree_id in bak_trees:
+    if not u_node.has_backup_treeid_rule(backup_edge,tree_id):
+      continue
+    u_rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
+    
+    if group_logic:
+      if u_rule.match_tag.type != TagType.GROUP_REUSE and u_rule.match_tag.type != TagType.GROUP:
+        modified_tag = Tag(TagType.GROUP, tag.value)
+        u_rule.add_outport_tag(outport,modified_tag)
+        continue
+      
+    u_rule.add_outport_tag(outport,tag)
+  
+  u2d_link.add_backup_tag(tag,backup_edge)  
+  
 def write_tag_upstream(trees, u_node,tag,outport,u2d_link,group_logic=False):
   
   for tree_id in trees:
@@ -594,6 +541,56 @@ def write_tag_upstream(trees, u_node,tag,outport,u2d_link,group_logic=False):
   
   u2d_link.add_tag(tag)
   
+
+def remove_backup_flow_entry_duplicates(d_node,match_tag,backup_edge):
+  
+  num_entries = 0
+  for flow in d_node.backup_flow_entries[backup_edge]:
+    if flow.match_tag == match_tag:
+      num_entries+=1
+  
+  remove_flows = set()
+  
+  for flow in d_node.backup_flow_entries[backup_edge]:
+    if num_entries <= 1:
+      break
+    if flow.match_tag == match_tag:
+      remove_flows.add(flow)
+      num_entries-=1
+  
+  for flow in remove_flows:
+    d_node.backup_flow_entries[backup_edge].discard(flow)
+        
+def match_backup_tag_downstream(trees, d_node,tag,backup_edge):
+  
+  flow_entry = FlowEntry()
+  flow_entry.match_tag = tag
+  
+  for tree_id in trees:
+    has_rule, existing_flow = d_node.has_empty_match_backup_treeid_rule(backup_edge,tree_id,flow_entry)
+    if has_rule:
+      existing_flow.match_tag = tag
+      flow_entry = existing_flow
+    #d_node.add_backup_treeid_rule(backup_edge,tree_id,flow_entry)
+    if not d_node.has_backup_match_tag(tag,backup_edge):
+      d_node.add_backup_treeid_rule(backup_edge,tree_id,flow_entry)
+      d_node.add_backup_flow_entry(backup_edge,flow_entry)
+
+  # remove any add_backup_flow duplicates
+  remove_backup_flow_entry_duplicates(d_node, tag, backup_edge)
+
+    
+def depracted_match_backup_tag_downstream(trees, d_node,tag,backup_edge):
+  
+  flow_entry = FlowEntry()
+  flow_entry.match_tag = tag
+  
+  # SELF-NOTE: this is where i might need to merge the FlowEntry with the empty match tag
+  if not d_node.has_backup_match_tag(tag,backup_edge):
+    d_node.add_backup_flow_entry(backup_edge,flow_entry)
+  
+  for tree_id in trees:
+    d_node.add_backup_treeid_rule(backup_edge,tree_id,flow_entry)
   
 def match_tag_downstream(trees, d_node,tag):
   
@@ -605,6 +602,17 @@ def match_tag_downstream(trees, d_node,tag):
   
   for tree_id in trees:
     d_node.treeid_rule_map[tree_id] = flow_entry
+    
+def check_remove_stale_d_node_backup_entry(in_bak_trees,d_node,new_tag,backup_edge):
+  """ Needed if future Group Address Forwarding Tag overwrites an Old one"""
+  for tree_id in in_bak_trees:
+    if d_node.has_backup_treeid_rule(backup_edge,tree_id):
+      old_rule = d_node.backup_treeid_rule_map[backup_edge][tree_id]
+      #if old_rule.match_tag.type != TagType.NONE and old_rule.match_tag != new_tag and len(old_rule.outport_tags) == 0:
+      if old_rule.match_tag.type != TagType.NONE and old_rule.match_tag != new_tag:   # want to keep the rules with empty match_tag (None) because will later create a rule that inherits their actions
+        print "DEBUG: removing B%s l=%s, Flow=%s" %(tree_id,backup_edge,old_rule)
+        del d_node.backup_treeid_rule_map[backup_edge][tree_id]
+        d_node.backup_flow_entries[backup_edge].discard(old_rule)
   
 def check_remove_stale_d_node_entry(in_trees,d_node,new_tag):
   """ Needed if future Group Address Forwarding Tag overwrites an Old one"""
@@ -619,6 +627,16 @@ def find_outports(controller,tree_id,node):
   outports = set()
   for link in node.out_links:
     if tree_id in link.trees:
+      outport = controller.adjacency[(link.upstream_node.id,link.downstream_node.id)]
+      outports.add(outport)
+      
+  return outports
+
+def find_backup_outports(controller,tree_id,node,backup_edge):
+  outports = set()
+  for link in node.out_links:
+    
+    if link.backup_trees.has_key(backup_edge) and tree_id in link.backup_trees[backup_edge]:
       outport = controller.adjacency[(link.upstream_node.id,link.downstream_node.id)]
       outports.add(outport)
       
@@ -655,10 +673,8 @@ def has_group_forwarding(controller,in_trees,d_node):
       non_shared_trees.add(s_tree)
   
    # removes any trees from shared_trees with not exactly the same outports
-  if len(non_shared_trees) != 0: print "BEFORE SHARED TREES = %s, in_trees=%s" %(shared_trees,in_trees)
   for n_tree in non_shared_trees:
     shared_trees.remove(n_tree)
-  if len(non_shared_trees) != 0: print "AFTER SHARED TREES = %s in_trees=%s" %(shared_trees,in_trees)
   if len(in_trees) > 1:
     return True,shared_trees    # not sure about returning shared trees
   
@@ -666,6 +682,54 @@ def has_group_forwarding(controller,in_trees,d_node):
     return False,None
   
   return True,shared_trees
+
+def has_group_backup_forwarding(controller,in_bak_trees,d_node,backup_edge):   
+  """ Return True if in_bak_trees have common_forwarding common forwarding. 
+    
+    (1) For each tree \in in_bak_trees, find the set of outports.  Return False if they are not the same
+    (2) Find the set of trees shared along in_tree links.  Check of these trees has the same outports from (1), If no, return False
+  """
+  outports = None
+  completed = set()
+  for tree_id in in_bak_trees:
+    if d_node.already_processed(backup_edge,tree_id):
+      completed.add(tree_id)
+      continue
+    b_outports = find_backup_outports(controller, tree_id, d_node,backup_edge)
+    if outports == None:
+      outports = b_outports
+    elif outports != b_outports:
+      return False,None
+  
+  shared_trees = set()
+  out_trees = set()
+  for d_link in d_node.out_links:
+    if d_link.backup_trees.has_key(backup_edge):
+      out_trees = d_link.backup_trees[backup_edge]
+    if len(in_bak_trees.intersection(out_trees)) == 0: continue
+    curr_share = out_trees.difference(in_bak_trees)
+    for tree in curr_share:
+      shared_trees.add(tree)
+  
+  non_shared_trees = set()
+  for s_tree in shared_trees:
+    s_outports = find_backup_outports(controller, s_tree, d_node,backup_edge)
+    if s_outports != outports and len(in_bak_trees) == 1:
+      return False,None
+    elif s_outports != outports and len(in_bak_trees) > 1:
+      non_shared_trees.add(s_tree)
+  
+   # removes any trees from shared_trees with not exactly the same outports
+  for n_tree in non_shared_trees:
+    shared_trees.remove(n_tree)
+  if len(in_bak_trees) > 1:
+    return True,shared_trees    # not sure about returning shared trees
+  
+  if len(in_bak_trees) == 1 and len(shared_trees) == 0:
+    return False,None
+  
+  return True,shared_trees
+
 
 def tag_and_match(controller,tree_id,u_node,d_node,u2d_link):
   """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
@@ -752,47 +816,7 @@ def create_single_tree_tagging_indices(controller,tree,tree_id,root_node):
       
   log.debug( "----------------------------------------------------------------------------\n")
   
-def depracated_create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge):
-  """  Do a BFS search of tree and determine the new_tag, keep_tag, and remove_tag indices we use to later to create the flow entry rules.
-   """
-  print "\nBACKUP TREE %s for edge = %s -----------------------------------------------------------------" %(btree_id,backup_edge)
-  q = Queue()
-  q.put(root_node)
-  visited = set()
-  while not q.empty():
-    node = q.get()
-    visited.add(node)
-    #if node.id == root_node.id and node.is_host:
-    #  print "\t Skipped h%s because is a host." %(node.id)
-    #  continue
-    
-    print "Visiting s%s" %(node.id)
-    
-    for d_link in node.out_links:
-      # check d_link is actually used by this backup tree
-      if not d_link.backup_trees.has_key(backup_edge): continue
-      if not btree_id in d_link.backup_trees[backup_edge]: continue
-      d_node = d_link.downstream_node
-      if d_node.is_host or d_node in visited: 
-        print "\t Skipped h%s because is a host." %(d_node.id)
-        continue
-      
-      q.put(d_node)
-      
-      if d_node.id not in btree.nodes_to_signal:      # still want to continue BFS from d_node, just don't need to add any tags
-        msg= "\t Skipping in-link=(%s,%s) versus s%s's outlinks for B%s because s%s does not have an edge  disjoint from its primary tree." %(node.id,d_node.id,d_node.id,btree_id,d_node.id)
-        #log.debug(msg)
-        print msg
-        continue
 
-      if controller.merger_optimization == Mode.MERGER:
-        print "\t processing B%s, in-link=(%s,%s) versus s%s's outlinks, to set the tagging rules at s%s " %(btree_id,node.id,d_node.id,d_node.id,d_node.id)
-        create_node_backup_tags(controller,btree_id, d_link, d_node,backup_edge)
-      else:
-        raise appleseed.AppleseedError("No relevant optimization strategy set for backup trees..  Exiting.")
-      
-  print "----------------------------------------------------------------------------\n"  
-  
 def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge,primary_tree_tagging=False):
   """ For each tree, if "primary_tree_tagging=True" check if overlap with primary_tree.  Otherwise, try creating tags based on common forwarding with other backup trees. """
   print "\nBACKUP TREE B%s for %s-----------------------------------------------------------------" %(btree_id,backup_edge)
@@ -820,36 +844,52 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
         print "\t Skipping creating match rule at s%s because s%s has already been processed for BT%s" %(d_node.id,d_node.id,btree_id)
         continue
       
-      print "\t- visiting s%s" %(d_node.id)
+      
 
       # for now will assume that neither u_node nor d_node are hosts.  this should be safe with my assumptions about topologies
-      if u_node.is_host:
+      if u_node.is_host and not primary_tree_tagging:  
+        print "\t- skipped s%s" %(d_node.id)
+        continue  #skip because already processed during first round of BFS traversal
+      elif u_node.is_host: 
         match_mcast_addr(controller,btree_id,d_node,u2d_link,backup_edge,default_ustar_backup_flow_priority)
       elif primary_tree_tagging:
         primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge)
       else:
-        create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,backup_edge)
-        
-      # XXX: skipping creation of actions at nodes 1 hop from upstream from terminal (e.g., action_write_terminal_host_addr()) because, as simplifying assumption,
-      #      we are assuming that each host is connected to only 1 switch
-        
-#      if u_node.is_host:
-#          match_mcast_addr(controller,tree_id,d_node,u2d_link)
-#        elif d_node.is_host:
-#          action_write_terminal_host_addr(controller, tree,tree_id, u_node, d_node, u2d_link)
-#        else:
-#          tag_and_match(controller,tree_id,u_node,d_node,u2d_link)
-
+        create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge)
       
+      print "\t- visiting s%s" %(d_node.id)
   print "----------------------------------------------------------------------------\n"  
 
-def create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,backup_edge):
+def create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge):
+  #tree_id btree_id, 
+  """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
+  bak_in_trees = u2d_link.backup_trees[backup_edge]
+  shared_bak_trees = set()
+  group_forwarding,shared_bak_trees = has_group_backup_forwarding(controller,bak_in_trees, d_node,backup_edge)
   
-  print "\t\t dummy create_backup_tree_tags() "
+  #print "\t\t WORK IN PROGRESS OUTPUT: group_forwarding = %s, shared_bak_trees = %s" %(group_forwarding,shared_bak_trees)
+  outport = controller.adjacency[(u_node.id,d_node.id)]
+
+  if group_forwarding:
+    action_tag,match_tag = get_backup_group_tag(controller,bak_in_trees,btree_id, u_node,outport,shared_bak_trees,d_node,backup_edge)
+    write_backup_tag_upstream(bak_in_trees, u_node,action_tag,outport,u2d_link,backup_edge,len(bak_in_trees) != 1)
+   #check_remove_stale_d_node_backup_entry(bak_in_trees,d_node,match_tag,backup_edge)
+    match_backup_tag_downstream(bak_in_trees, d_node,match_tag,backup_edge)
+  else:
+    if len(bak_in_trees) == 1:
+      action_tag,match_tag = get_single_backup_tag(controller,tree_id, u_node,backup_edge)    #action_tag and match_tag are the same here
+      write_backup_tag_upstream(bak_in_trees, u_node,action_tag,outport,u2d_link,backup_edge)
+      match_backup_tag_downstream(bak_in_trees, d_node,match_tag,backup_edge)
+    elif len(bak_in_trees) > 1:
+      action_tag,match_tag = get_single_backup_tag(controller, tree_id, u_node,backup_edge,True)
+      trees = set()
+      trees.add(tree_id)
+      write_backup_tag_upstream(trees, u_node,action_tag,outport,u2d_link,backup_edge)
+      match_backup_tag_downstream(trees, d_node,match_tag,backup_edge)
 
 
 def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
-  
+  """ Processes one u2d_node link.  looks at all of d_node's out-links for primary tree overlap"""
   btree_outports = btree.find_outports(d_node.id)
   candidates = set()
   
@@ -867,18 +907,20 @@ def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
   reuse_d_match = False
   write_flow = None
   u_flow = None
-  if u_node.treeid_rule_map.has_key(btree_id):  # if u_flow is None that means we will have to write a tag ups
-    u_flow = u_node.treeid_rule_map[btree_id]
+  if u_node.has_backup_treeid_rule(backup_edge,btree_id):  # if u_flow is None that means we will have to write a tag upstream
+    u_flow = u_node.backup_treeid_rule_map[backup_edge][btree_id]
   for candidate in candidates:
     ptree_id = candidate[0]
-    p_flow = candidate[1]
+    p_flow = candidate[1]   # primary tree flow at d_node
     
-    if p_flow.match_tag.type == TagType.MCAST_DST_ADDR and btree.mcast_address == p_flow.match_tag.value:   
+    if p_flow.match_tag.type == TagType.MCAST_DST_ADDR and btree.mcast_address == p_flow.match_tag.value:   # backup tree intersecting with its primary
       reuse_u_match = True
       no_write_flow = p_flow
+      break
     elif u_flow != None and u_flow.match_tag.value == p_flow.match_tag.value:   
       reuse_u_match = True
       no_write_flow = p_flow
+      break
     elif p_flow.match_tag.type != TagType.MCAST_DST_ADDR:
       reuse_d_match = True
       write_flow = p_flow
@@ -899,17 +941,20 @@ def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
     reuse_flow.do_not_install = True
     d_node.add_backup_treeid_rule(backup_edge,btree_id,reuse_flow)
     d_node.add_backup_flow_entry(backup_edge,reuse_flow)
+    d_node.add_backup_tagging_completed(backup_edge,btree_id)
     
     if u_flow == None:
       u_flow = FlowEntry()
-      u_node.add_backup_treeid_rule(backup_edge,btree_id,u_flow)
-      u_node.add_backup_flow_entry(backup_edge,u_flow)
-      #print "\t\t Flow rule created with empty match and only an action at s%s" %(u_node.id)
-      #msg = "Something wrong wrong, here.  should have a u_flow at s%s for T%s. Exiting" %(u_node.id,btree_id)  # this may be ok, not sure.
-      #raise appleseed.AppleseedError(msg)
-    
+
     outport = controller.adjacency[(u_node.id,d_node.id)]
-    u_flow.add_outport_tag(outport, reuse_flow.match_tag)
+    out_tag = reuse_flow.match_tag
+    if out_tag.type == TagType.GROUP_REUSE:
+      out_tag = Tag(TagType.GROUP,reuse_flow.match_tag.value)
+    elif out_tag.type == TagType.SINGLE_REUSE:
+      out_tag = Tag(TagType.SINGLE,reuse_flow.match_tag.value)
+    u_flow.add_outport_tag(outport, out_tag)
+    u_node.add_backup_treeid_rule(backup_edge,btree_id,u_flow)
+    u_node.add_backup_flow_entry(backup_edge,u_flow)
     print "\t\t At s%s, writing a placeholder flow (b/c reusuing a primary tree flow at s%s).  at s%s, created flow with no match and action to write the tag." %(d_node.id,d_node.id,u_node.id)
   else:  
      print "\t\t No primary tree overlap action at s%s" %(d_node.id)
@@ -941,14 +986,27 @@ def total_num_flows():
 
 def print_node_flow_entries(node,skip_if_empty=False):
     
-    if skip_if_empty and len(node.flow_entries) == 0:
-      return
+  if skip_if_empty and len(node.flow_entries) == 0:
+    return
+  
+  out_str = "\nS%s Flow Entries ----------------------------------------------------------------------------------------------------\n" %(node.id)
+  for flow in node.flow_entries:
+    out_str += "\t %s\n" %(flow)
+  out_str += "--------------------------------------------------------------------------------------------------------------------" 
+  print out_str
     
-    out_str = "\nS%s Flow Entries ----------------------------------------------------------------------------------------------------\n" %(node.id)
-    for flow in node.flow_entries:
-      out_str += "\t %s\n" %(flow)
-    out_str += "--------------------------------------------------------------------------------------------------------------------" 
-    print out_str
+def print_node_backup_flow_entries(node,backup_edge,skip_if_empty=False,msg=None):
+  
+  if skip_if_empty and (not node.backup_flow_entries.has_key(backup_edge) or len(node.backup_flow_entries[backup_edge]) == 0):
+    return
+  out_str = ""
+  if msg!=None:
+    out_str = "(%s) " %(msg)
+  out_str += "\nS%s Flow Entries for l=%s----------------------------------------------------------------------------------------------------\n" %(node.id,backup_edge)
+  for flow in node.backup_flow_entries[backup_edge]:
+    out_str += "\t %s\n" %(flow)
+  out_str += "--------------------------------------------------------------------------------------------------------------------" 
+  print out_str
     
 def print_flow_entries():
   
@@ -956,6 +1014,12 @@ def print_flow_entries():
     if not node.is_host:
       print_node_flow_entries(node,True)
 
+def print_backup_flow_entries(backup_map,msg=None):
+  
+  for backup_edge in backup_map:
+    for node in nodes.values():
+      if not node.is_host:
+        print_node_backup_flow_entries(node,backup_edge,True,msg)
       
 def find_unique_backup_edges(controller):
   """ Create and return a list of all backup edges"""
@@ -974,7 +1038,7 @@ def find_unique_backup_edges(controller):
   return backup_map
          
       
-def create_backup_tree_tag_indices(controller):
+def create_backup_tag_indices(controller):
   """ For each backup_edge, create the indices for all backup trees using this edge.  
 
       First, check all trees for primary tree overlap.  Then, for each edge without primary tree overlap, try to create tags based on backup trees with same forwarding.
@@ -987,6 +1051,7 @@ def create_backup_tree_tag_indices(controller):
       root_node = nodes[root_id]
       create_single_backup_tree_tagging_indices(controller,backup_tree,backup_tree.id,root_node,backup_edge,primary_tree_tagging) 
   
+#  print_backup_flow_entries(backup_map,"Primary Tree Overlap Only")
   primary_tree_tagging = False
   for backup_edge in backup_map:
     for backup_tree in backup_map[backup_edge]:
@@ -994,6 +1059,7 @@ def create_backup_tree_tag_indices(controller):
       root_node = nodes[root_id]
       create_single_backup_tree_tagging_indices(controller,backup_tree,backup_tree.id,root_node,backup_edge,primary_tree_tagging)   
     
+  print_backup_flow_entries(backup_map)
 def create_merged_backup_tree_flows(controller):
   """ Merger Algorithm for primary trees """
   
@@ -1004,7 +1070,7 @@ def create_merged_backup_tree_flows(controller):
     edge.print_if_marked()
   print "-------------------------------------------------------------------------------------------------"
   
-  create_backup_tree_tag_indices(controller)
+  create_backup_tag_indices(controller)
   
   #print "Exit for Backup Tree Merger Tagging development."
   #os._exit(0)
@@ -1227,48 +1293,6 @@ def in_link_is_no_tag(node,tree_id):
     if in_link.trees == tree_set:
       return True
   return False
-
-def create_no_tag_rules(node,new_tag_rules,controller):
-  """ Generate rule for no value"""
-  no_tag_rules = {}
-  host_to_port_map={}
-  switch_ports=[] 
-  dst_addresses=[]
-  for tree_id in node.no_tags.keys():
-    root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
-    #old_mac = controller.arpTable[node.id][mcast_addr].mac
-    old_mac = dummy_mac_addr
-    outports = node.no_tags[tree_id]
-    tree = get_tree(tree_id, controller)
-    #if tree.is_leaf_node(node.id):
-    #  host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-        
-    if new_tag_rules.has_key(tree_id):
-      # append to existing rule for this tree
-      rule = new_tag_rules[tree_id]
-      if tree.is_leaf_node(node.id):
-        host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-        rule = append_rewrite_dst_ofp_action(controller,node.id,rule,switch_ports,outports,dst_addresses,host_to_port_map,old_mac) 
-      else:
-        #TODO: this is where we could insert logic to avoid writing the old_mac address if its already there !!!
-        append_ether_dst_ofp_action(rule, old_mac, outports)
-      
-    else:
-      # create a new rule
-      rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
-      rule.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
-      rule.priority = default_no_tag_flow_priority
-      if tree.is_leaf_node(node.id):
-        host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-        rule = append_rewrite_dst_ofp_action(controller,node.id,rule,switch_ports,outports,dst_addresses,host_to_port_map,old_mac) 
-      else:
-        if in_link_is_no_tag(node,tree_id):
-          for prt in outports:
-            rule.actions.append(of.ofp_action_output(port = prt))
-        else:
-          rule = append_ether_dst_ofp_action(rule, old_mac, outports)
-      no_tag_rules[tree_id] = rule
-  return no_tag_rules
   
 def depracated_create_install_merged_flow_rules(controller):
   """ Use the value indices of each node to create the merged flow entriies and install them."""
@@ -1813,7 +1837,7 @@ class Edge ():
   def __repr__(self):
     return self.__str__()    
 
-TagType = enum(GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5)    
+TagType = enum(NONE=-1,GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5)    
 
 class Tag ():
   
@@ -1822,6 +1846,8 @@ class Tag ():
     self.type = type    #TagType: SINGLE is for tree specific address, MCAST_DST_ADDR is for matching using destination address, HOST_DST_ADDR is for rewritng host dest addres
       
   def __eq__(self,other):
+#    if self.type == TagType.NONE or other.type == TagType.NONE:
+#      return False
     if self.type == other.type and self.value == other.value:
       return True
     return False
@@ -1831,6 +1857,8 @@ class Tag ():
     return hash(self.type) + hash(self.value)
   
   def __str__(self):
+    if self.type == TagType.NONE:
+       return "(None,%s)" %(self.value)
     if self.type == TagType.GROUP_REUSE:
        return "(Group_Reuse,%s)" %(self.value)
     if self.type == TagType.GROUP:
@@ -1867,14 +1895,13 @@ class Node ():
         return True
     return False
   
-#  def already_processed(self,backup_edge,tree_id):
-#    """ Check if the a flow entry match has already been created at this node for given backup_edge and tree_id"""
-#    if not self.backup_treeid_rule_map.has_key(backup_edge):
-#      return False
-#    map = self.backup_treeid_rule_map[backup_edge]
-#    if not map.has_key(tree_id):
-#      return False
-#    return True
+  def has_backup_match_tag(self,match_tag,backup_edge):
+    if not self.backup_flow_entries.has_key(backup_edge):
+      return False
+    for flow_entry in self.backup_flow_entries[backup_edge]:
+      if flow_entry.match_tag != None and flow_entry.match_tag == match_tag:
+        return True
+    return False
 
   def already_processed(self,backup_edge,tree_id):
     """ Check if the a flow entry match has already been created at this node for given backup_edge and tree_id"""
@@ -1891,7 +1918,8 @@ class Node ():
       completed = set()
       completed.add(btree_id)
       self.backup_tagging_completed[backup_edge] = completed
-    
+ 
+     
   def add_backup_treeid_rule(self,backup_edge,tree_id,flow_entry):
     if self.backup_treeid_rule_map.has_key(backup_edge):
       map = self.backup_treeid_rule_map[backup_edge]
@@ -1899,16 +1927,62 @@ class Node ():
     else:
       map = {tree_id:flow_entry}
       self.backup_treeid_rule_map[backup_edge] = map
+    
+  def has_empty_match_backup_treeid_rule(self,backup_edge,tree_id,flow_entry):
+    if self.backup_treeid_rule_map.has_key(backup_edge):
+      map = self.backup_treeid_rule_map[backup_edge]
+      if map.has_key(tree_id) and map[tree_id].match_tag.type == TagType.NONE:
+        return True,map[tree_id]
+    return False, None
+
+    
+#  Attempt at trying to merge backup tree rules -- (11/11/13) Not needed b/c of other bug fix
+#
+#  def add_backup_treeid_rule(self,backup_edge,tree_id,flow_entry):
+#    if self.backup_treeid_rule_map.has_key(backup_edge):
+#      map = self.backup_treeid_rule_map[backup_edge]
+#      if map.has_key(tree_id) and map[tree_id].match_tag == Tag(TagType.NONE):
+#        print "INSIDE !!!!!"
+#        map[tree_id].match_tag = flow_entry.match_tag
+#        for outport in flow_entry.outport_tags.keys():
+#          if not map[tree_id].outport_tags.has_key(outport):
+#            print "INSIDE INSIDE !!!!!"
+#            map[tree_id].outport_tags[outport] = flow_entry.outport_tags[outport]
+#        return map[tree_id]
+#      else:
+#        map[tree_id] = flow_entry
+#      #map[tree_id] = flow_entry
+#    else:
+#      map = {tree_id:flow_entry}
+#      self.backup_treeid_rule_map[backup_edge] = map
+#    
+#    return flow_entry
   
-  def add_backup_flow_entry(self,backup_edge,flow_entry):
+  def add_backup_flow_entry(self,backup_edge,new_flow_entry):
     if self.backup_flow_entries.has_key(backup_edge):
       flows = self.backup_flow_entries[backup_edge]
-      flows.add(flow_entry)
+      # need special logic here to remove an existing flow(s) from 'backup_flow_entries' with an empty match and the same outport_tags as new_flow_entry 
+      remove_flows = set()
+      for flow in flows:
+        if flow.match_tag == new_flow_entry.match_tag and flow.outport_tags.keys() == new_flow_entry.outport_tags.keys():
+          remove_flows.add(flow)
+#      if new_flow_entry.match_tag.type == TagType.NONE:
+#        for flow in flows:
+#          if flow.match_tag.value == new_flow_entry.match_tag.value and flow.outport_tags.keys() == new_flow_entry.outport_tags.keys():
+#            remove_flows.add(flow)
+      for flow in remove_flows: flows.discard(flow)
+      flows.add(new_flow_entry)
     else:
       flows = set()
-      flows.add(flow_entry)
+      flows.add(new_flow_entry)
       self.backup_flow_entries[backup_edge]= flows 
-  
+
+  def has_backup_treeid_rule(self,backup_edge,tree_id):
+    if self.backup_treeid_rule_map.has_key(backup_edge):
+      map = self.backup_treeid_rule_map[backup_edge]
+      return map.has_key(tree_id)
+    else:
+      return False
   
   def add_backup_ofp_rule(self,backup_edge,ofp_rule):
     if self.backup_ofp_rules.has_key(backup_edge):
@@ -1951,7 +2025,7 @@ class Node ():
 class FlowEntry(): 
 
   def __init__(self):
-    self.match_tag = None   # Tag
+    self.match_tag = Tag(TagType.NONE)   # Tag
     self.outport_tags = {}  # outport -> Tag  (value can be None if we are reusing a value, host_id if we need to write the host_id, of )
     self.do_not_install = False  # True for backup tree flow entry writing or reusing the tag of a primary tree
     self.priority = of.OFP_DEFAULT_PRIORITY
@@ -2002,16 +2076,21 @@ class FlowEntry():
     if self.match_tag.type == TagType.GROUP_REUSE or self.match_tag.type == TagType.GROUP or self.match_tag.type == TagType.SINGLE or self.match_tag.type ==TagType.SINGLE_REUSE:
       return of.ofp_match(dl_type = ethernet.IP_TYPE, dl_dst = self.match_tag.value) 
     elif self.match_tag.type == TagType.MCAST_DST_ADDR:
+      self.priority = self.priority + 1
       return of.ofp_match(dl_type = ethernet.IP_TYPE, nw_dst = self.match_tag.value)
     elif self.match_tag.type == TagType.HOST_DST_ADDR:
       msg = "trying to create a match rule using host destination address = %s.  This should never happen.  Exiting" %(self.match_tag.value)
       raise appleseed.AppleseedError(msg)
     
   def __str__(self):
-    out_str = "M=%s, A={" %(self.match_tag)
+    out_str = ""
+    if self.do_not_install:
+      out_str += "Placeholder, "
+    out_str += "M=%s, A={" %(self.match_tag)
     for outport in self.outport_tags.keys():
       tag = self.outport_tags[outport]
       out_str += "%s:%s," %(outport,tag)
+
     out_str += "}"
     return out_str
     

@@ -34,6 +34,46 @@ def get_num_type_matches(node_id,type):
   
   return actual_value
 
+def get_num_type_backup_matches(node_id,type,backup_edge):
+  
+  node = multicast.nodes[node_id]
+  actual_value = 0
+  
+  if not node.backup_flow_entries.has_key(backup_edge):
+    return actual_value
+  for flow_entry in node.backup_flow_entries[backup_edge]:
+    match = flow_entry.match_tag
+    if match.type == type:
+      actual_value += 1
+  
+  return actual_value
+
+
+def get_num_type_backup_actions(node_id,type,backup_edge):
+  
+  node = multicast.nodes[node_id]
+  actual_value = 0
+  if not node.backup_flow_entries.has_key(backup_edge):
+    return actual_value
+  for flow_entry in node.backup_flow_entries[backup_edge]:
+    for action in flow_entry.outport_tags.values():
+      if action.type == type:
+        actual_value += 1
+  
+  return actual_value
+
+def get_num_placeholder_flows(node_id,backup_edge):
+  
+  node = multicast.nodes[node_id]
+  actual_value = 0
+  if not node.backup_flow_entries.has_key(backup_edge):
+    return actual_value
+  for flow_entry in node.backup_flow_entries[backup_edge]:
+    if flow_entry.do_not_install:
+      actual_value += 1
+  
+  return actual_value
+
 def get_num_type_actions(node_id,type):
   
   node = multicast.nodes[node_id]
@@ -75,6 +115,40 @@ def check_correct_flow_matches(expected_matches,test_name):
         msg = "\n [TEST-ERROR] %s s%s should have %s match tags of type=%s, but has %s.  Exiting test. "  %(test_name,node_id,expected_value,tag_type_str,actual_value)
         print msg
         os._exit(0)
+
+def check_correct_backup_flow_matches(expected_matches,backup_edge,test_name):
+  
+  for node_id in expected_matches.keys():
+    for tuple in expected_matches[node_id]:
+      type = tuple[0]
+      expected_value = tuple[1]
+      actual_value = get_num_type_backup_matches(node_id,type,backup_edge)
+      if expected_value != actual_value:
+        tag_type_str = get_tag_type_str(type)
+        msg = "\n [TEST-ERROR] %s, Backup trees for l=%s: s%s should have %s match backup tags of type=%s, but has %s.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,tag_type_str,actual_value)
+        print msg
+        os._exit(0) 
+  
+def check_correct_backup_flow_actions(expected_actions,backup_edge,test_name):
+  
+  for node_id in expected_actions.keys():
+    for tuple in expected_actions[node_id]:
+      type = tuple[0]
+      expected_value = tuple[1]
+      actual_value = get_num_type_backup_actions(node_id,type,backup_edge)
+      if expected_value != actual_value:
+        tag_type_str = get_tag_type_str(type)
+        msg = "\n [TEST-ERROR] %s, Backup trees for l=%s: s%s should have %s action tags of type=%s, but has %s.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,tag_type_str,actual_value)
+        print msg      
+  
+def check_correct_num_placeholder_backup_flows(expected_placeholders,backup_edge,test_name):
+  
+  for node_id in expected_placeholders.keys():
+    expected_value = expected_placeholders[node_id]
+    actual_value = get_num_placeholder_flows(node_id,backup_edge)
+    if expected_value != actual_value:
+      msg = "\n [TEST-ERROR]  %s, Backup trees for l=%s: s%s should have %s placeholder flows but has %s placeholder flows.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,actual_value)
+      print msg    
       
 def check_correct_flow_actions(expected_actions,test_name):
   
@@ -89,6 +163,7 @@ def check_correct_flow_actions(expected_actions,test_name):
         msg = "\n [TEST-ERROR] %s s%s should have %s action tags of type=%s, but has %s.  Exiting test. "  %(test_name,node_id,expected_value,tag_type_str,actual_value)
         print msg
         os._exit(0)
+
         
 def check_correct_num_flows(expected_num_flows,test_name):
   
@@ -101,6 +176,21 @@ def check_correct_num_flows(expected_num_flows,test_name):
       msg = "\n [TEST-ERROR] %s s%s should have %s flows but has %s flows.  Exiting test. "  %(test_name,node_id,expected_value,actual_value)
       print msg
       os._exit(0)
+      
+def check_correct_num_backup_flows(expected_num_flows,backup_edge,test_name):
+  
+  for node_id in expected_num_flows.keys():
+    expected_value = expected_num_flows[node_id]
+    node = multicast.nodes[node_id]
+    actual_value = 0
+    if node.backup_flow_entries.has_key(backup_edge):
+      actual_value = len(node.backup_flow_entries[backup_edge])
+    
+    if expected_value != actual_value:
+      msg = "\n [TEST-ERROR] %s, Backup trees for l=%s: s%s should have %s backup flows but has %s flows.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,actual_value)
+      print msg
+      os._exit(0)      
+
 
 def print_successful_test_results(test_names):
   
@@ -122,9 +212,33 @@ def test_h6s9():
   controller.adjacency = h6s9_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
-  multicast.install_all_trees(controller)
-  #multicast.compute_primary_trees(controller)
-  #multicast.create_install_merged_primary_tree_flows(controller)
+  multicast.compute_primary_trees(controller)
+  multicast.create_install_merged_primary_tree_flows(controller)
+  
+    # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
+  expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]    
+                      }
+  
+  test_name = "test_backups_h6s9()"
+  check_correct_flow_matches(expected_matches, test_name)
+  
+  expected_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,2),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,2)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],    
+                    }
+  check_correct_flow_actions(expected_actions, test_name)
+  
+  multicast.compute_backup_trees(controller)
   
   #print "OS EXIT AT test_h6s9() "
   #os._exit(0)
@@ -160,7 +274,6 @@ def test_backups_h6s9_3trees():
   check_correct_num_flows(expected_num_flows, test_name)
 
   
-    # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
   expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
                       8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
                       9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
@@ -187,8 +300,49 @@ def test_backups_h6s9_3trees():
   check_correct_flow_actions(expected_actions, test_name)  
 
   multicast.compute_backup_trees(controller)
-  #print "OS EXIT AT test_backups_h6s9_3trees() "
-  #os._exit(0)
+  
+  backup_edges = set()
+  for ptree in controller.primary_trees:
+    for btree in ptree.backup_trees:
+      edge = btree.backup_edge
+      backup_edges.add(edge)
+  
+  # includes placeholders
+  expected_num_backup_flows = {7:2,8:0,9:1,10:0,11:1,12:2,13:1,14:1,15:0}
+  expected_backup_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)],
+                      13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]    
+                      }
+  
+  
+  
+  expected_backup_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,2)],
+                    13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],    
+                    }
+  expected_placeholder_backup_flows = {7:0,8:0,9:1,10:0,11:1,12:2,13:0,14:1,15:0}    
+
+  for backup_edge in backup_edges:
+    check_correct_num_backup_flows(expected_num_backup_flows, backup_edge, test_name)
+    check_correct_backup_flow_matches(expected_backup_matches, backup_edge, test_name)
+    check_correct_backup_flow_actions(expected_backup_actions, backup_edge, test_name)
+    check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
+  
+  
+  print "OS EXIT AT test_backups_h6s9_3trees() "
+  os._exit(0)
 
 def test_h6s10():
   
