@@ -330,7 +330,7 @@ class fault_tolerant_controller (EventMixin):
             
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
-            multicast.install_all_trees(self)
+            multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
             return
           
           if multicast.is_mcast_address(a.protodst,self):

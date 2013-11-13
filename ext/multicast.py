@@ -190,12 +190,32 @@ def compute_primary_trees(controller):
   for mcast_addr in controller.mcast_groups.keys():
     
     end_hosts = controller.mcast_groups[mcast_addr]   # this is the root and all terminal nodes
-    root = end_hosts[0]
+    root = end_hosts[0]  
     terminal_hosts = end_hosts[1:]
     
     #some check here for # of switches
     edges = []
 
+    # NICK: this is where you want to insert your multicast tree computation using the root and terminal_hosts read from the file
+    #       this will replace the hard-coded mutlicast trees created below (although keep those hard-coded trees because they are good for testing :) )
+    
+    # NICK: the commented code below is some starter code to set up the call the computing the Steiner Arboresence
+#    flag_to_run_nicks_code = True
+#    if flag_to_run_nicks_code == True:
+#      adjacency_list = controller.adjacency.keys()
+#      root_id = find_node_id(root)
+#      terminal_ids = list()
+#      for host in terminal_hosts:
+#        terminal_ids.append(find_node_id(host))
+#      
+#      # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
+#      edges = compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
+#      
+#      data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+#      tree = PrimaryTree(**data)
+#      controller.primary_trees.append(tree)
+#      continue
+    
     # some temporary hard-coding going on here 
     if mcast_addr == mcast_ip_addr1:
       if num_switches == 4 and len(end_hosts) == 3: #H3S4
@@ -1339,17 +1359,17 @@ def create_node_edge_objects(controller):
     nodes[d_id] = d
     edges[(u_id,d_id)]= ud
     edges[(d_id,u_id)] = du
-  
-
+   
 def install_all_trees(controller):
   """  (1) Compute and install the primary trees. 
        (2) Triggers a pcount session after a 5 second delay (using a timer)
        (3) Precompute backup trees
   
+      NICK: Here is where the primary trees are computed and installed.  Also, we precompute (and potentially pre-install) backup trees here.
    """
-  generate_multicast_groups(controller)
+  generate_multicast_groups(controller)  # NICK: currently the mutlicast groups are just read from a file 'mtree_file_str'
   
-  compute_primary_trees(controller)
+  compute_primary_trees(controller)   # NICK: look at this function 
   
   if controller.merger_optimization != Mode.BASELINE:
     create_install_merged_primary_tree_flows(controller)
@@ -1371,14 +1391,43 @@ def install_all_trees(controller):
   
 
 def compute_backup_trees(controller):
-  """ Short-term: hard-coded backup tree + assume only one primary tree"""
+  """ Short-term: hard-coded backup tree + assume only one backup tree per primary tree"""
   num_switches = len(core.openflow_discovery._dps)
   
   for primary_tree in controller.primary_trees:  # self-note: would require another loop to precompute backups for ALL links
     end_hosts = controller.mcast_groups[primary_tree.mcast_address]   # this is the root and all terminal nodes
     backup_tree_edges = []
     backup_edge = ()
-  
+    
+    # NICK. this is where you should insert your backup tree computation.  Below is some starter code, that sets up the call to your function "compute_backup_trees"
+    
+#    flag_to_run_nicks_code = True
+#    if flag_to_run_nicks_code == True:
+#      adjacency_list = controller.adjacency.keys()
+#      root_id = find_node_id(primary_tree.root_ip_address)
+#      terminal_ids = list()
+#      for host in primary_tree.terminal_ip_addresses:
+#        terminal_ids.append(find_node_id(host))
+#      
+#      for backup_edge in primary_tree.edges:
+#        upstream_node_id = backup_edge[0]
+#        downstream_node_id = backup_edge[1]
+#        if primary_tree.is_host(upstream_node_id) or primary_tree.is_host(downstream_node_id):
+#          continue  # We don't need to compute backup trees for edges to and from a host.
+#        
+#        # NICK: replace "compute_backup_tree()" with the name of your function.  
+#        backup_tree_edges = compute_backup_tree(adjacency_list,root_id,terminal_ids,primary_tree.edges,backup_edge)  # remove the backup_edge from G' and set the edge weights of each primary_tree edge to 0
+#        
+#        data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
+#              "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
+#        backup_tree = BackupTree(**data)
+#        primary_tree.backup_trees.append(backup_tree) 
+#      
+#        if controller.merger_optimization == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+#          backup_tree.preinstall_baseline_backups()
+#      
+#      continue
+    
     if primary_tree.mcast_address == mcast_ip_addr1:
       if num_switches == 8 and len(end_hosts) == 4: #H4S8
         backup_tree_edges = [(1,5),(5,11),(11,7),(11,12),(12,10),(12,9),(7,2),(9,3),(10,4)]
