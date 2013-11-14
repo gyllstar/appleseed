@@ -143,8 +143,8 @@ class fault_tolerant_controller (EventMixin):
     #self.backup_tree_mode = multicast.BackupMode.REACTIVE
     self.backup_tree_mode = multicast.BackupMode.PROACTIVE
     
-    #self.merger_optimization = multicast.Mode.MERGER
-    self.merger_optimization = multicast.Mode.BASELINE
+    self.algorithm_mode = multicast.Mode.MERGER
+    #self.algorithm_mode = multicast.Mode.BASELINE
     
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
@@ -183,6 +183,12 @@ class fault_tolerant_controller (EventMixin):
     return pkt_loss_cnt > packets_dropped_threshold
          
   def activate_backup_trees(self,failed_link):
+    
+    if self.algorithm_mode == multicast.Mode.MERGER:
+      affected_trees = multicast.find_affected_primary_trees(self.primary_trees,failed_link)
+      multicast.activate_merger_backups(self,affected_trees,failed_link)
+      return
+        
     for tree in multicast.find_affected_primary_trees(self.primary_trees,failed_link):
       msg = "installing backup tree for mcast_addr = %s for failed link %s" %(tree.mcast_address,failed_link)
       log.info(msg)

@@ -274,7 +274,7 @@ def mark_primary_tree_edges(controller):
 def mark_backup_tree_edges(controller):
   """ Traverse the links of each tree and mark that the tree uses that edge. """
   for ptree in controller.primary_trees:
-    for btree in ptree.backup_trees:
+    for btree in ptree.backup_trees.values():
       for edge_id in btree.edges:
         edge = edges[edge_id]
         edge.add_backup_tree(btree.id,btree.backup_edge)
@@ -482,6 +482,12 @@ def get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=Fals
   rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
   match_type = rule.match_tag.type
   
+  tree = get_tree(tree_id, controller)
+  
+  if u_node.already_processed(backup_edge,tree_id):   # upstream forwarding using Primary Tree tag so have to match at d_node using MCAST ADDRESS
+    mcast_tag = Tag(TagType.MCAST_DST_ADDR,tree.mcast_address)
+    return mcast_tag,mcast_tag
+  
   reuse_action_tag = Tag(TagType.SINGLE_REUSE, rule.match_tag.value)
   if match_type == TagType.SINGLE_REUSE:
     return reuse_action_tag,reuse_action_tag
@@ -489,7 +495,7 @@ def get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=Fals
   if match_type == TagType.SINGLE:
     return reuse_action_tag,reuse_action_tag
   
-  tree = get_tree(tree_id, controller)
+  
   
   if match_type == TagType.MCAST_DST_ADDR:
     return tree.default_tag,tree.default_tag
@@ -826,7 +832,7 @@ def create_single_tree_tagging_indices(controller,tree,tree_id,root_node):
       log.debug("\t- visiting s%s" %(d_node.id))
       
       
-      if controller.merger_optimization == Mode.MERGER:
+      if controller.algorithm_mode == Mode.MERGER:
         if u_node.is_host:
           match_mcast_addr(controller,tree_id,d_node,u2d_link)
         elif d_node.is_host:
@@ -839,14 +845,14 @@ def create_single_tree_tagging_indices(controller,tree,tree_id,root_node):
 
 def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_node,backup_edge,primary_tree_tagging=False):
   """ For each tree, if "primary_tree_tagging=True" check if overlap with primary_tree.  Otherwise, try creating tags based on common forwarding with other backup trees. """
-  print "\nBACKUP TREE B%s for %s-----------------------------------------------------------------" %(btree_id,backup_edge)
+  log.debug( "\nBACKUP TREE B%s for %s-----------------------------------------------------------------" %(btree_id,backup_edge))
   q = Queue()
   q.put(root_node)
   visited = set()
   while not q.empty():
     u_node = q.get()
     visited.add(u_node)
-    print "At n%s" %(u_node.id)
+    log.debug("At n%s" %(u_node.id))
     
     for u2d_link in u_node.out_links:
       if not u2d_link.backup_trees.has_key(backup_edge): continue
@@ -857,18 +863,17 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
         q.put(d_node)
       
       if u_node.id not in btree.nodes_to_signal:     
-        print "\t Skipping s%s backup tree tagging because s%s is not a node BT%s needs to signal" %(u_node.id,u_node.id,btree_id)
+        log.debug( "\t Skipping s%s backup tree tagging because s%s is not a node BT%s needs to signal" %(u_node.id,u_node.id,btree_id))
         continue
       
       if d_node.already_processed(backup_edge,btree_id):     
-        print "\t Skipping creating match rule at s%s because s%s has already been processed for BT%s" %(d_node.id,d_node.id,btree_id)
+        log.debug( "\t Skipping creating match rule at s%s because s%s has already been processed for BT%s" %(d_node.id,d_node.id,btree_id))
         continue
       
       
 
       # for now will assume that neither u_node nor d_node are hosts.  this should be safe with my assumptions about topologies
       if u_node.is_host and not primary_tree_tagging:  
-        print "\t- skipped s%s" %(d_node.id)
         continue  #skip because already processed during first round of BFS traversal
       elif u_node.is_host: 
         match_mcast_addr(controller,btree_id,d_node,u2d_link,backup_edge,default_ustar_backup_flow_priority)
@@ -877,17 +882,17 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
       else:
         create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge)
       
-      print "\t- visiting s%s" %(d_node.id)
-  print "----------------------------------------------------------------------------\n"  
+      log.debug( "\t- visited s%s" %(d_node.id))
+  log.debug( "----------------------------------------------------------------------------\n"  )
 
 def create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge):
-  #tree_id btree_id, 
   """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
   bak_in_trees = u2d_link.backup_trees[backup_edge]
   shared_bak_trees = set()
   group_forwarding,shared_bak_trees = has_group_backup_forwarding(controller,bak_in_trees, d_node,backup_edge)
+  if u_node.already_processed(backup_edge,btree_id) and not d_node.already_processed(backup_edge,btree_id): 
+    group_forwarding = False
   
-  #print "\t\t WORK IN PROGRESS OUTPUT: group_forwarding = %s, shared_bak_trees = %s" %(group_forwarding,shared_bak_trees)
   outport = controller.adjacency[(u_node.id,d_node.id)]
 
   if group_forwarding:
@@ -897,13 +902,13 @@ def create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,bac
     match_backup_tag_downstream(bak_in_trees, d_node,match_tag,backup_edge)
   else:
     if len(bak_in_trees) == 1:
-      action_tag,match_tag = get_single_backup_tag(controller,tree_id, u_node,backup_edge)    #action_tag and match_tag are the same here
+      action_tag,match_tag = get_single_backup_tag(controller,btree_id, u_node,backup_edge)    #action_tag and match_tag are the same here
       write_backup_tag_upstream(bak_in_trees, u_node,action_tag,outport,u2d_link,backup_edge)
       match_backup_tag_downstream(bak_in_trees, d_node,match_tag,backup_edge)
     elif len(bak_in_trees) > 1:
-      action_tag,match_tag = get_single_backup_tag(controller, tree_id, u_node,backup_edge,True)
+      action_tag,match_tag = get_single_backup_tag(controller, btree_id, u_node,backup_edge,True)
       trees = set()
-      trees.add(tree_id)
+      trees.add(btree_id)
       write_backup_tag_upstream(trees, u_node,action_tag,outport,u2d_link,backup_edge)
       match_backup_tag_downstream(trees, d_node,match_tag,backup_edge)
 
@@ -917,7 +922,6 @@ def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
     p_flow = d_node.treeid_rule_map[ptree_id]  #tree_id --> FlowEntry
     p_outports = set(p_flow.outport_tags.keys())
     
-    #print "\t\t s%s, PrimaryTree = T%s, p_outports = %s vs backup_outports = %s" %(d_node.id,ptree_id,p_outports,btree_outports)
     if p_outports == btree_outports:
       candidates.add((ptree_id,p_flow))
   
@@ -941,24 +945,35 @@ def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
       reuse_u_match = True
       no_write_flow = p_flow
       break
-    elif p_flow.match_tag.type != TagType.MCAST_DST_ADDR:
+    elif not reuse_u_match and p_flow.match_tag.type != TagType.MCAST_DST_ADDR:
       reuse_d_match = True
       write_flow = p_flow
+
   
   if reuse_u_match:  # do nothing upstream, and create a rule for downstream (but this rule is not installed because we are reusing the downstream rule)
     reuse_flow = FlowEntry()
     reuse_flow.match_tag = no_write_flow.match_tag
     reuse_flow.outport_tags = no_write_flow.outport_tags
-    reuse_flow.do_not_install = True
+    reuse_flow.is_placeholder = True
     d_node.add_backup_treeid_rule(backup_edge,btree_id,reuse_flow)
     d_node.add_backup_flow_entry(backup_edge,reuse_flow)
-    print "\t\t At s%s writing a placeholder flow (b/c reusuing a primary tree flow at s%s). At s%s, no action created." %(d_node.id,d_node.id,u_node.id)
     d_node.add_backup_tagging_completed(backup_edge,btree_id)
+    outport = controller.adjacency[(u_node.id,d_node.id)]
+    out_tag =reuse_flow.match_tag
+    if u_flow == None:
+      u_flow = FlowEntry()
+    u_flow.add_outport_tag(outport, out_tag)
+    u_node.add_backup_treeid_rule(backup_edge,btree_id,u_flow)
+    u_node.add_backup_flow_entry(backup_edge,u_flow)
+    
+    
+    log.debug( "\t\t At s%s writing a placeholder flow (b/c reusuing a primary tree flow at s%s). At s%s, outport action with no tag created." %(d_node.id,d_node.id,u_node.id))
+    
   elif reuse_d_match:
     reuse_flow = FlowEntry()
     reuse_flow.match_tag = write_flow.match_tag
     reuse_flow.outport_tags = write_flow.outport_tags
-    reuse_flow.do_not_install = True
+    reuse_flow.is_placeholder = True
     d_node.add_backup_treeid_rule(backup_edge,btree_id,reuse_flow)
     d_node.add_backup_flow_entry(backup_edge,reuse_flow)
     d_node.add_backup_tagging_completed(backup_edge,btree_id)
@@ -975,13 +990,12 @@ def primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge):
     u_flow.add_outport_tag(outport, out_tag)
     u_node.add_backup_treeid_rule(backup_edge,btree_id,u_flow)
     u_node.add_backup_flow_entry(backup_edge,u_flow)
-    print "\t\t At s%s, writing a placeholder flow (b/c reusuing a primary tree flow at s%s).  at s%s, created flow with no match and action to write the tag." %(d_node.id,d_node.id,u_node.id)
+    log.debug("\t\t At s%s, writing a placeholder flow (b/c reusuing a primary tree flow at s%s).  at s%s, created flow with no match and action to write the tag." %(d_node.id,d_node.id,u_node.id))
   else:  
-     print "\t\t No primary tree overlap action at s%s" %(d_node.id)
+     log.debug("\t\t No primary tree overlap action at s%s" %(d_node.id))
   
 def create_tag_indices(controller):
   """ For each tree do a BFS. """  
-  print controller.adjacency
   for tree in controller.primary_trees:
     root_id = find_node_id(tree.root_ip_address)
     root_node = nodes[root_id]
@@ -989,8 +1003,53 @@ def create_tag_indices(controller):
   
   
   print_flow_entries()
-  print "Total Number of Flows = %s" %(total_num_flows())
+  log.debug("Total Number of Flows = %s" %(total_num_flows()))
 
+
+def preinstall_all_merged_backup_flows(controller):
+  """ PROACTIVE Mode: For each backup tree, preinstall backup tree flows for non ustar nodes. """
+  for node in nodes.values():
+    for backup_edge in node.preinstalled_backup_ofp_rules.keys():
+      node.preinstall_merged_backup_ofp_rules(controller,backup_edge)
+
+def activate_merger_backups(controller,affected_trees,failed_link):
+  
+  if controller.backup_tree_mode == BackupMode.PROACTIVE:
+    most_upstream = set()
+    for ptree in affected_trees:
+      backup_tree = ptree.backup_trees[failed_link]
+      ustar = backup_tree.get_most_upstream_node()
+      most_upstream.add(ustar)
+    for node_id in most_upstream:
+      node = nodes[node_id]
+      node.install_most_upstream_ofp_rules(controller,failed_link)
+      
+  elif controller.backup_tree_mode == BackupMode.REACTIVE:
+    for ptree in affected_trees:
+      signaled_nodes = set()
+      backup_tree = ptree.backup_trees[failed_link]
+      for node_id in backup_tree.nodes_to_signal:
+        if node_id in signaled_nodes:
+          continue
+        node = nodes[node_id]
+        node.install_precomputed_backup_ofp_rules(controller,backup_edge)
+        signaled_nodes.add(node_id)
+
+def generate_all_backup_ofp_rules(controller):
+  """ For each backup_edge, create the OpenFlow rules for each Primary Tree using the backup edge.  The OpenFlow rules are created using the tagging indices created earlier.
+      
+      The OFP rules are stored at each node, but not installed.
+  """
+  backup_map = find_unique_backup_edges(controller)
+  for backup_edge in backup_map:
+    most_upstream_node = None
+    for backup_tree in backup_map[backup_edge]:  
+      most_upstream_node = backup_tree.get_most_upstream_node()
+   # print "Most Upstream = s%s" %(most_upstream_node)
+    for node in nodes.values():
+      node.generate_backup_ofp_rules(controller,backup_edge,node.id == most_upstream_node)  #no-op if node has no flows associated with backup_edge
+    
+  
 def install_ofp_merge_rules(controller):
   """ Create the OpenFlow rules using the tagging indices created earlier. """
   for node in nodes.values():
@@ -1004,48 +1063,63 @@ def total_num_flows():
       total_flows += len(node.flow_entries)
   return total_flows
 
-def print_node_flow_entries(node,skip_if_empty=False):
+def print_node_flow_entries(node,skip_if_empty=False,logging=False):
     
   if skip_if_empty and len(node.flow_entries) == 0:
     return
   
-  out_str = "\nS%s Flow Entries ----------------------------------------------------------------------------------------------------\n" %(node.id)
+  out_str = "\n\t\tS%s Flow Entries ----------------------------------------------------------------------------------------------------\n" %(node.id)
   for flow in node.flow_entries:
-    out_str += "\t %s\n" %(flow)
-  out_str += "--------------------------------------------------------------------------------------------------------------------" 
-  print out_str
+    out_str += "\t\t\t %s\n" %(flow)
+  out_str += "\t\t--------------------------------------------------------------------------------------------------------------------" 
+  if not logging:
+    print out_str
+  else:
+    log.debug(out_str)
     
-def print_node_backup_flow_entries(node,backup_edge,skip_if_empty=False,msg=None):
+def print_node_backup_flow_entries(node,backup_edge,skip_if_empty=False,msg=None,logging=False):
   
   if skip_if_empty and (not node.backup_flow_entries.has_key(backup_edge) or len(node.backup_flow_entries[backup_edge]) == 0):
     return
   out_str = ""
   if msg!=None:
     out_str = "(%s) " %(msg)
-  out_str += "\nS%s Flow Entries for l=%s----------------------------------------------------------------------------------------------------\n" %(node.id,backup_edge)
+  out_str += "\n\t\tS%s Flow Entries for l=%s----------------------------------------------------------------------------------------------------\n" %(node.id,backup_edge)
   for flow in node.backup_flow_entries[backup_edge]:
-    out_str += "\t %s\n" %(flow)
-  out_str += "--------------------------------------------------------------------------------------------------------------------" 
-  print out_str
+    out_str += "\t\t\t %s\n" %(flow)
+  out_str += "\t\t--------------------------------------------------------------------------------------------------------------------" 
+  if not logging:
+    print out_str
+  else:
+    log.debug(out_str)
     
 def print_flow_entries():
   
   for node in nodes.values():
     if not node.is_host:
-      print_node_flow_entries(node,True)
+      print_node_flow_entries(node,True,logging=True)
+
+def print_backup_ofp_rules(controller,backup_edge):
+  
+  for node in nodes.values():
+    if controller.backup_tree_mode == BackupMode.PROACTIVE:
+      node.print_proactive_backup_ofp_rules(backup_edge)
+    elif controller.backup_tree_mode == BackupMode.REACTIVE:
+      node.print_reactive_backup_ofp_rules(backup_edge) 
+    
 
 def print_backup_flow_entries(backup_map,msg=None):
   
   for backup_edge in backup_map:
     for node in nodes.values():
       if not node.is_host:
-        print_node_backup_flow_entries(node,backup_edge,True,msg)
+        print_node_backup_flow_entries(node,backup_edge,True,msg,logging=True)
       
 def find_unique_backup_edges(controller):
-  """ Create and return a list of all backup edges"""
-  backup_map = {}
+  """ Create and return a dict of all backup edges and the backup trees for that backup edge """
+  backup_map = {}   # edge --> set of backup trees for that edge
   for ptree in controller.primary_trees:
-    for btree in ptree.backup_trees:
+    for btree in ptree.backup_trees.values():
       edge = btree.backup_edge
       if backup_map.has_key(edge):
         backup_map[edge].add(btree)
@@ -1054,7 +1128,7 @@ def find_unique_backup_edges(controller):
         backup_set.add(btree)
         backup_map[edge] = backup_set
         
-  print "Unique Backup Edges = %s" %(backup_map)
+  #print "Unique Backup Edges = %s" %(backup_map)
   return backup_map
          
       
@@ -1081,16 +1155,16 @@ def create_backup_tag_indices(controller):
     
   print_backup_flow_entries(backup_map)
 def create_merged_backup_tree_flows(controller):
-  """ Merger Algorithm for primary trees """
+  """ Merger Algorithm for backup trees """
   
   mark_backup_tree_edges(controller)
   
-  print "\n--------------------------------Marked Edge Objects--------------------------------------------"
-  for edge in edges.values():
-    edge.print_if_marked()
-  print "-------------------------------------------------------------------------------------------------"
-  
   create_backup_tag_indices(controller)
+  
+  generate_all_backup_ofp_rules(controller)
+  
+  if controller.backup_tree_mode == BackupMode.PROACTIVE:
+    preinstall_all_merged_backup_flows(controller)
   
   #print "Exit for Backup Tree Merger Tagging development."
   #os._exit(0)
@@ -1113,9 +1187,7 @@ def create_install_merged_primary_tree_flows(controller):
   
   #depracated_create_install_merged_flow_rules(controller)      
       
-  print "\n -------------------------------------------------------------------------------------------------------" 
-  print "\t\t  INSTALLED MERGED FLOW ENTRIES!!!! "
-  print " -------------------------------------------------------------------------------------------------------"
+  log.debug("\t\t  INSTALLED MERGED FLOW ENTRIES!!!! ")
   
 
 def get_tree(tree_id,controller):
@@ -1371,8 +1443,10 @@ def install_all_trees(controller):
   
   compute_primary_trees(controller)   # NICK: look at this function 
   
-  if controller.merger_optimization != Mode.BASELINE:
+  if controller.algorithm_mode != Mode.BASELINE:
     create_install_merged_primary_tree_flows(controller)
+    
+    # TODO: invoke pcount 
   else:   # run baseline
     for tree in controller.primary_trees:
       tree.install()
@@ -1423,7 +1497,7 @@ def compute_backup_trees(controller):
 #        backup_tree = BackupTree(**data)
 #        primary_tree.backup_trees.append(backup_tree) 
 #      
-#        if controller.merger_optimization == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+#        if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
 #          backup_tree.preinstall_baseline_backups()
 #      
 #      continue
@@ -1448,12 +1522,12 @@ def compute_backup_trees(controller):
     data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
             "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
     backup_tree = BackupTree(**data)
-    primary_tree.backup_trees.append(backup_tree) 
+    primary_tree.backup_trees[backup_edge] = backup_tree
     
-    if controller.merger_optimization == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+    if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
       backup_tree.preinstall_baseline_backups()
   
-  if controller.merger_optimization == Mode.MERGER:    
+  if controller.algorithm_mode == Mode.MERGER:    
     create_merged_backup_tree_flows(controller)
   
 def find_node_id(ip_address):
@@ -1499,6 +1573,9 @@ class MulticastTree ():
     for ip in self.terminal_ip_addresses:
       if find_node_id(ip) == id:
         return ip
+      
+    if find_node_id(self.root_ip_address) == id:
+      return self.root_ip_address
   
   def find_parent_node(self,node_id):
     
@@ -1635,7 +1712,7 @@ class PrimaryTree (MulticastTree):
   
   def __init__(self, **kwargs):
     MulticastTree.__init__(self, **kwargs)
-    self.backup_trees = []  
+    self.backup_trees = {} #edge --> BackupTree
     
     
     
@@ -1698,13 +1775,13 @@ class BackupTree (MulticastTree):
     self.nodes_to_signal = self.sort_nodes_bottom_up(upstream_nodes)
     
     
-    if self.controller.merger_optimization == Mode.MERGER:
-      # add the parent node of most upstream node, if the parent is not a host
+    if self.controller.algorithm_mode == Mode.MERGER:
+      # add the parent node of most upstream node, if the parent is not a host (EDIT: adding parent even if its a host)
       most_upstream = self.nodes_to_signal[-1]
       parent = self.find_parent_node(most_upstream)
       self.nodes_to_signal.append(parent)
-      if not self.is_host(parent):
-        self.nodes_to_signal.append(parent)
+#      if not self.is_host(parent):
+#        self.nodes_to_signal.append(parent)
   
 
   
@@ -1744,6 +1821,15 @@ class BackupTree (MulticastTree):
         is_most_upstream = (node_id == self.nodes_to_signal[-1])
         self.install_nonleaf_flow(node_id,is_most_upstream)
   
+  def get_most_upstream_node(self):
+    if self.controller.algorithm_mode == Mode.MERGER:
+      candidate = self.nodes_to_signal[-1]
+      if self.is_host(candidate):
+        return self.nodes_to_signal[-2] #because we add the host to signal set in order to create backup flow entries
+      return self.nodes_to_signal[-1]
+    elif self.controller.algorithm_mode == Mode.BASELINE:
+      return self.nodes_to_signal[-1]
+  
   def activate_baseline_backups(self):
     """ Baseline Algorithm for recovery."""
     if self.controller.backup_tree_mode == BackupMode.REACTIVE:
@@ -1761,8 +1847,8 @@ class BackupTree (MulticastTree):
     self.primary_tree.garbage_collect_stale_flows()
 
   def activate_merger_backups(self):
-    """ Baseline Algorithm for recovery."""    
-      
+    """ Merger Algorithm for recovery."""    
+    # nothing here because implemented in Nodes
     
   def activate(self):
     """ Activate the backup tree.  For Proactive, signal the most upstream node.  For reactive signal all relevant nodes bottom up. 
@@ -1770,11 +1856,11 @@ class BackupTree (MulticastTree):
         Note: this means that we are signalling one tree at-a-time to activate backups, rather than iterating over the set of switches and sending messages
               for all backup trees to that switch before moving to the next switch.
     """
-    if self.controller.merger_optimization == Mode.MERGER:
+    if self.controller.algorithm_mode == Mode.MERGER:
+      self.activate_merger_backups()
+    elif self.controller.algorithm_mode == Mode.BASELINE:
       self.activate_baseline_backups()
-    elif self.controller.merger_optimization == Mode.BASELINE:
-      self.activate_baseline_backups()
-    elif self.controller.merger_optimization == Mode.MERGER_DEPRACATED:
+    elif self.controller.algorithm_mode == Mode.MERGER_DEPRACATED:
       raise appleseed.AppleseedError("No implementation of backup tree activation for MERGER_DEPRACATED mode.")
     else:
       raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
@@ -1806,7 +1892,7 @@ class Edge ():
       btrees.add(tree_id)
       self.backup_trees[backup_edge] = btrees
     
-    print "\t\t %s, l=%s --> add BT%s " %(self.end_points_str(),backup_edge,tree_id)
+    #print "\t\t %s, l=%s --> add BT%s " %(self.end_points_str(),backup_edge,tree_id)
   
   def add_backup_tag(self,tag,backup_edge):
     if self.backup_tags.has_key(backup_edge):
@@ -1931,7 +2017,10 @@ class Node ():
     self.backup_treeid_rule_map = {}  # backup_edge --> {tree_id --> flow_entry}
     self.backup_flow_entries = {} # backup_edge --> flow_entries (set)
     self.backup_tagging_completed = {} # backup_edge --> set(btree_ids)
-    self.backup_ofp_rules = {}    # backup_edge --> ofp_rules (set)
+    
+    self.preinstalled_backup_ofp_rules = {}   # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are installed
+    self.most_upstream_node_ofp_rules = {}    # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed
+    self.precomputed_backup_ofp_rules = {}    # For Reactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed.
   
   def has_match_tag(self,match_tag):
     for flow_entry in self.flow_entries:
@@ -1979,29 +2068,6 @@ class Node ():
         return True,map[tree_id]
     return False, None
 
-    
-#  Attempt at trying to merge backup tree rules -- (11/11/13) Not needed b/c of other bug fix
-#
-#  def add_backup_treeid_rule(self,backup_edge,tree_id,flow_entry):
-#    if self.backup_treeid_rule_map.has_key(backup_edge):
-#      map = self.backup_treeid_rule_map[backup_edge]
-#      if map.has_key(tree_id) and map[tree_id].match_tag == Tag(TagType.NONE):
-#        print "INSIDE !!!!!"
-#        map[tree_id].match_tag = flow_entry.match_tag
-#        for outport in flow_entry.outport_tags.keys():
-#          if not map[tree_id].outport_tags.has_key(outport):
-#            print "INSIDE INSIDE !!!!!"
-#            map[tree_id].outport_tags[outport] = flow_entry.outport_tags[outport]
-#        return map[tree_id]
-#      else:
-#        map[tree_id] = flow_entry
-#      #map[tree_id] = flow_entry
-#    else:
-#      map = {tree_id:flow_entry}
-#      self.backup_treeid_rule_map[backup_edge] = map
-#    
-#    return flow_entry
-  
   def add_backup_flow_entry(self,backup_edge,new_flow_entry):
     if self.backup_flow_entries.has_key(backup_edge):
       flows = self.backup_flow_entries[backup_edge]
@@ -2010,10 +2076,6 @@ class Node ():
       for flow in flows:
         if flow.match_tag == new_flow_entry.match_tag and flow.outport_tags.keys() == new_flow_entry.outport_tags.keys():
           remove_flows.add(flow)
-#      if new_flow_entry.match_tag.type == TagType.NONE:
-#        for flow in flows:
-#          if flow.match_tag.value == new_flow_entry.match_tag.value and flow.outport_tags.keys() == new_flow_entry.outport_tags.keys():
-#            remove_flows.add(flow)
       for flow in remove_flows: flows.discard(flow)
       flows.add(new_flow_entry)
     else:
@@ -2027,15 +2089,35 @@ class Node ():
       return map.has_key(tree_id)
     else:
       return False
-  
-  def add_backup_ofp_rule(self,backup_edge,ofp_rule):
-    if self.backup_ofp_rules.has_key(backup_edge):
-      rules = self.backup_ofp_rules[backup_edge]
+
+  def add_preinstalled_backup_ofp_rule(self,backup_edge,ofp_rule):
+    if self.preinstalled_backup_ofp_rules.has_key(backup_edge):
+      rules = self.preinstalled_backup_ofp_rules[backup_edge]
       rules.add(ofp_rule)
     else:
       rules = set()
       rules.add(ofp_rule)
-      self.backup_ofp_rules[backup_edge]= rules
+      self.preinstalled_backup_ofp_rules[backup_edge]= rules
+       
+
+  def add_most_upstream_node_ofp_rule(self,backup_edge,ofp_rule):
+    if self.most_upstream_node_ofp_rules.has_key(backup_edge):
+      rules = self.most_upstream_node_ofp_rules[backup_edge]
+      rules.add(ofp_rule)
+    else:
+      rules = set()
+      rules.add(ofp_rule)
+      self.most_upstream_node_ofp_rules[backup_edge]= rules
+       
+
+  def add_precomputed_backup_ofp_rule(self,backup_edge,ofp_rule):
+    if self.precomputed_backup_ofp_rules.has_key(backup_edge):
+      rules = self.precomputed_backup_ofp_rules[backup_edge]
+      rules.add(ofp_rule)
+    else:
+      rules = set()
+      rules.add(ofp_rule)
+      self.precomputed_backup_ofp_rules[backup_edge]= rules
        
   def generate_ofp_rule(self,flow_entry,controller,node_id):
     rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
@@ -2049,15 +2131,71 @@ class Node ():
     for flow_entry in self.flow_entries:
       rule = self.generate_ofp_rule(flow_entry,controller,node_id)
       self.installed_ofp_rules.add(rule)
+      
+  def generate_backup_ofp_rules(self,controller,backup_edge,is_most_upstream_node): 
+    """ Iterate through self.flow_entries and create ofp_rule"""
+    if not self.backup_flow_entries.has_key(backup_edge): return
+    for flow_entry in self.backup_flow_entries[backup_edge]:
+      if flow_entry.is_placeholder:
+        continue
+      rule = self.generate_ofp_rule(flow_entry,controller,self.id)
+      
+      if controller.backup_tree_mode == BackupMode.REACTIVE:
+        self.add_precomputed_backup_ofp_rule(backup_edge,rule)
+      elif controller.backup_tree_mode == BackupMode.PROACTIVE:
+        if is_most_upstream_node:
+          self.add_most_upstream_node_ofp_rule(backup_edge, rule)
+        else:
+          self.add_preinstalled_backup_ofp_rule(backup_edge, rule)
+          
+  def install_precomputed_backup_ofp_rules(self,controller,backup_edge):
+    for ofp_rule in self.precomputed_backup_ofp_rules[backup_edge]:
+      utils.send_msg_to_switch(ofp_rule, self.id)
+      controller.cache_flow_table_entry(self.id, ofp_rule)
+      
+  def install_most_upstream_ofp_rules(self,controller,backup_edge):
+    for ofp_rule in self.most_upstream_node_ofp_rules[backup_edge]:
+      utils.send_msg_to_switch(ofp_rule, self.id)
+      controller.cache_flow_table_entry(self.id, ofp_rule)
+     
+  def preinstall_merged_backup_ofp_rules(self,controller,backup_edge): 
+    """ Note: we do NOT want to install the flows for u_star nodes."""
+    for ofp_rule in self.preinstalled_backup_ofp_rules[backup_edge]:
+      utils.send_msg_to_switch(ofp_rule, self.id)
+      controller.cache_flow_table_entry(self.id, ofp_rule)
     
   def install_ofp_rules(self,controller):
     """ Install the ofp_rules."""
     for rule in self.installed_ofp_rules:
       utils.send_msg_to_switch(rule, self.id)
       controller.cache_flow_table_entry(self.id, rule)
-
-  def print_ofp_rules(self,controller):
+     
+  def print_proactive_backup_ofp_rules(self,backup_edge):
     """ Install the ofp_rules."""
+    if not self.preinstalled_backup_ofp_rules.has_key(backup_edge) and not self.most_upstream_node_ofp_rules.has_key(backup_edge): return
+    cnt = 0
+    print "S%s, l=%s Proactive Mode Rules ------------------------------------------------------------------------------------------------------------------------------------------------------------" %(self.id,backup_edge)
+    if self.preinstalled_backup_ofp_rules.has_key(backup_edge):
+      for rule in self.preinstalled_backup_ofp_rules[backup_edge]:
+        cnt+=1
+        print "S%s, l=%s Rule %s " %(self.id,backup_edge, cnt)
+        print "%s \n" %(utils.get_ofp_rule_str(rule))     
+    if self.most_upstream_node_ofp_rules.has_key(backup_edge):
+      for rule in self.most_upstream_node_ofp_rules[backup_edge]:
+        cnt+=1
+        print "S%s, l=%s Rule %s " %(self.id,backup_edge, cnt)
+        print "%s \n" %(utils.get_ofp_rule_str(rule))     
+   
+  def print_reactive_backup_ofp_rules(self,backup_edge):
+    if not self.precomputed_backup_ofp_rules.has_key(backup_edge): return
+    cnt = 0
+    print "S%s, l=%s Reactive Mode Rules ------------------------------------------------------------------------------------------------------------------------------------------------------------" %(self.id,backup_edge)
+    for rule in self.precomputed_backup_ofp_rules[backup_edge]:
+      cnt+=1
+      print "S%s, l=%s Rule %s " %(self.id,backup_edge, cnt)
+      print "%s \n" %(utils.get_ofp_rule_str(rule))
+
+  def print_ofp_rules(self):
     cnt = 0
     print "S%s Rules ------------------------------------------------------------------------------------------------------------------------------------------------------------" %(self.id)
     for rule in self.installed_ofp_rules:
@@ -2071,7 +2209,7 @@ class FlowEntry():
   def __init__(self):
     self.match_tag = Tag(TagType.NONE)   # Tag
     self.outport_tags = {}  # outport -> Tag  (value can be None if we are reusing a value, host_id if we need to write the host_id, of )
-    self.do_not_install = False  # True for backup tree flow entry writing or reusing the tag of a primary tree
+    self.is_placeholder = False  # True for backup tree flow entry writing or reusing the tag of a primary tree
     self.priority = of.OFP_DEFAULT_PRIORITY
   
   def add_outport_tag(self,outport,tag):
@@ -2128,7 +2266,7 @@ class FlowEntry():
     
   def __str__(self):
     out_str = ""
-    if self.do_not_install:
+    if self.is_placeholder:
       out_str += "Placeholder, "
     out_str += "M=%s, A={" %(self.match_tag)
     for outport in self.outport_tags.keys():

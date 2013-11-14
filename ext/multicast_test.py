@@ -6,6 +6,7 @@
 
 
 import appleseed,multicast
+from multicast import BackupTree
 from multicast import TagType
 from pox.lib.addresses import IPAddr,EthAddr
 import pox.openflow.libopenflow_01 as of
@@ -68,7 +69,7 @@ def get_num_placeholder_flows(node_id,backup_edge):
   if not node.backup_flow_entries.has_key(backup_edge):
     return actual_value
   for flow_entry in node.backup_flow_entries[backup_edge]:
-    if flow_entry.do_not_install:
+    if flow_entry.is_placeholder:
       actual_value += 1
   
   return actual_value
@@ -139,7 +140,7 @@ def check_correct_backup_flow_actions(expected_actions,backup_edge,test_name):
         tag_type_str = get_tag_type_str(type)
         msg = "\n [TEST-ERROR] %s, Backup trees for l=%s: s%s should have %s action tags of type=%s, but has %s.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,tag_type_str,actual_value)
         print msg   
-        os.exit(0)   
+        os._exit(0)   
   
 def check_correct_num_placeholder_backup_flows(expected_placeholders,backup_edge,test_name):
   
@@ -149,7 +150,7 @@ def check_correct_num_placeholder_backup_flows(expected_placeholders,backup_edge
     if expected_value != actual_value:
       msg = "\n [TEST-ERROR]  %s, Backup trees for l=%s: s%s should have %s placeholder flows but has %s placeholder flows.  Exiting test. "  %(test_name,backup_edge,node_id,expected_value,actual_value)
       print msg   
-      os.exit(0) 
+      os._exit(0) 
       
 def check_correct_flow_actions(expected_actions,test_name):
   
@@ -216,7 +217,7 @@ def test_h6s9():
   multicast.mtree_file_str="mtree-h6s9-2t.csv"
   multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.MERGER
+  controller.algorithm_mode = multicast.Mode.MERGER
   controller.adjacency = h6s9_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
@@ -248,8 +249,197 @@ def test_h6s9():
   
   multicast.compute_backup_trees(controller)
   
+  backup_edges = set()
+  for ptree in controller.primary_trees:
+    for btree in ptree.backup_trees.values():
+      edge = btree.backup_edge
+      backup_edges.add(edge)
+  
+  # includes placeholders
+  expected_num_backup_flows = {7:2,8:0,9:1,10:0,11:1,12:2,13:1,14:1,15:0}
+  expected_backup_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      14:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]    
+                      }
+  
+  
+  
+  expected_backup_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,2)],
+                    13:[(TagType.GROUP_REUSE,1),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],    
+                    }
+  expected_placeholder_backup_flows = {7:0,8:0,9:1,10:0,11:1,12:2,13:0,14:0,15:0}    
+
+  for backup_edge in backup_edges:
+    check_correct_num_backup_flows(expected_num_backup_flows, backup_edge, test_name)
+    check_correct_backup_flow_matches(expected_backup_matches, backup_edge, test_name)
+    check_correct_backup_flow_actions(expected_backup_actions, backup_edge, test_name)
+    check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
+  
   #print "OS EXIT AT test_h6s9() "
   #os._exit(0)
+  
+def test_backups_h6s11():
+  print "**** RUNNING MERGER_TEST.test_backups_h6s11() ****"
+  setup()
+  h6s11_adjancency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 16): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, (8, 10): 3, (13, 7): 1, 
+                      (12, 10): 2, (17,12):1, (17,15):2, (17,14):3, (12, 17): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (12, 15): 3, (9, 2): 3, (7, 13): 3, (11, 3): 3, (14, 17): 2, 
+                      (15, 6): 2, (12, 4): 4, (13, 16): 2, (7, 8): 4, (16,11):1, (16,13):2}
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.backup_tree_mode = multicast.BackupMode.PROACTIVE
+  controller.adjacency = h6s11_adjancency
+  core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16,17]
+  
+  #multicast.compute_primary_trees(controller)
+  
+  edges1 = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+  mcast_addr1 = IPAddr("10.10.10.10")
+  root1 = IPAddr("10.0.0.1")
+  terminal_hosts1 = [IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  data = {"edges":edges1, "mcast_address":mcast_addr1, "root":root1, "terminals":terminal_hosts1, "adjacency":controller.adjacency, "controller":controller}
+  tree1 = multicast.PrimaryTree(**data)
+  controller.primary_trees.append(tree1)  
+ 
+  edges5= [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+  mcast_addr5 = IPAddr("10.11.11.11")
+  root5 = IPAddr("10.0.0.5")
+  terminal_hosts5 = [IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  data = {"edges":edges5, "mcast_address":mcast_addr5, "root":root5, "terminals":terminal_hosts5, "adjacency":controller.adjacency, "controller":controller}
+  tree5 = multicast.PrimaryTree(**data) 
+  controller.primary_trees.append(tree5)  
+  
+  edges = [(2,9), (9,8), (8,7), (7,13), (13,14), (14,17), (17,15), (17,12), (12,4), (15,6)]
+  mcast_addr = IPAddr("10.12.12.12")
+  root = IPAddr("10.0.0.2")
+  terminal_hosts = [IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  #controller.mcast_groups[mcast_addr] = [root]+terminal_hosts
+  data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+  tree = multicast.PrimaryTree(**data)
+  
+  
+  
+  controller.primary_trees.append(tree)  
+  controller.mcast_groups[mcast_addr] = [root]+terminal_hosts
+  multicast.create_install_merged_primary_tree_flows(controller)
+  print "here 2"
+
+  expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:2,16:0,17:1}
+  
+  test_name = "test_backups_h6s11()"
+  check_correct_num_flows(expected_num_flows, test_name)
+
+  
+  expected_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      17:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]    
+                      }
+  
+  check_correct_flow_matches(expected_matches, test_name)
+  
+  expected_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,2),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)], 
+                    10:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,3)],
+                    13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,2)], 
+                    16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    17:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,2),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)]     
+                    }
+  check_correct_flow_actions(expected_actions, test_name)  
+  
+  
+  
+  backup_tree_edges1 = [(1,7),(7,13),(13,16),(13,14),(14,17),(16,11),(11,3),(17,12),(12,4)]
+  backup_edge = (7,8)
+  
+  data = {"edges":backup_tree_edges1, "mcast_address":tree1.mcast_address, "root":tree1.root_ip_address, "terminals":tree1.terminal_ip_addresses, 
+            "adjacency":controller.adjacency, "controller":controller,"primary_tree":tree1,"backup_edge":backup_edge}
+  backup_tree = BackupTree(**data)
+  tree1.backup_trees[backup_edge] = backup_tree
+  
+  backup_tree_edges5 = [(5,7),(7,13),(13,16),(13,14),(14,17),(16,11),(11,3),(17,12),(12,15),(12,4),(15,6)]
+  
+  data = {"edges":backup_tree_edges5, "mcast_address":tree5.mcast_address, "root":tree5.root_ip_address, "terminals":tree5.terminal_ip_addresses, 
+            "adjacency":controller.adjacency, "controller":controller,"primary_tree":tree5,"backup_edge":backup_edge}
+  backup_tree = BackupTree(**data)
+  tree5.backup_trees[backup_edge] = backup_tree
+
+  multicast.compute_backup_trees(controller)
+  
+  backup_edges = set()
+  for ptree in controller.primary_trees:
+    for btree in ptree.backup_trees.values():
+      edge = btree.backup_edge
+      backup_edges.add(edge)
+  
+  # includes placeholders
+  expected_num_backup_flows = {7:2,8:0,9:0,10:0,11:1,12:2,13:1,14:1,15:0,16:1,17:2}
+  expected_backup_matches = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                      11:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)],
+                      13:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,1),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      16:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                      17:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)]    
+                      }
+  
+  
+  
+  expected_backup_actions = {7:[(TagType.GROUP_REUSE,0),(TagType.GROUP,2),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    8:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    9:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                    10:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                    11:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,1)],
+                    12:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,2)],
+                    13:[(TagType.GROUP_REUSE,1),(TagType.GROUP,0),(TagType.SINGLE,1),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    14:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,1),(TagType.HOST_DST_ADDR,0)],
+                    15:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)], 
+                    16:[(TagType.GROUP_REUSE,0),(TagType.GROUP,1),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,0),(TagType.HOST_DST_ADDR,0)],
+                    17:[(TagType.GROUP_REUSE,0),(TagType.GROUP,0),(TagType.SINGLE,0),(TagType.SINGLE_REUSE,0),(TagType.MCAST_DST_ADDR,2),(TagType.HOST_DST_ADDR,0)]      
+                    }
+  expected_placeholder_backup_flows = {7:0,8:0,9:0,10:0,11:1,12:2,13:0,14:1,15:0,16:0,17:0}    
+
+  for backup_edge in backup_edges:
+    check_correct_num_backup_flows(expected_num_backup_flows, backup_edge, test_name)
+    check_correct_backup_flow_matches(expected_backup_matches, backup_edge, test_name)
+    check_correct_backup_flow_actions(expected_backup_actions, backup_edge, test_name)
+    check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
+  
+    #multicast.print_backup_ofp_rules(controller,backup_edge)
+  
+  print "OS EXIT AT test_backups_h6s11() "
+  os._exit(0)  
+  
 
 def test_backups_h6s9_3trees():
   print "**** RUNNING MERGER_TEST.test_backups_h6s9_3trees() ****"
@@ -258,7 +448,9 @@ def test_backups_h6s9_3trees():
   multicast.mtree_file_str="mtree-h6s9-2t.csv"
   multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.MERGER
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.backup_tree_mode = multicast.BackupMode.REACTIVE
+  #controller.backup_tree_mode = multicast.BackupMode.PROACTIVE
   controller.adjacency = h6s9_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
   
@@ -312,7 +504,7 @@ def test_backups_h6s9_3trees():
   
   backup_edges = set()
   for ptree in controller.primary_trees:
-    for btree in ptree.backup_trees:
+    for btree in ptree.backup_trees.values():
       edge = btree.backup_edge
       backup_edges.add(edge)
   
@@ -349,6 +541,7 @@ def test_backups_h6s9_3trees():
     check_correct_backup_flow_actions(expected_backup_actions, backup_edge, test_name)
     check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
   
+    #multicast.print_backup_ofp_rules(controller,backup_edge)
   
   #print "OS EXIT AT test_backups_h6s9_3trees() "
   #os._exit(0)
@@ -362,7 +555,7 @@ def test_h6s10():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
 
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.MERGER
+  controller.algorithm_mode = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -410,7 +603,7 @@ def test_h6s10_4trees_order1():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
   
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.MERGER
+  controller.algorithm_mode = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -468,7 +661,7 @@ def test_h6s10_4trees_order2():
   multicast.measure_pnts_file_str="measure-h6s10-1d-1p.csv"
   
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.MERGER
+  controller.algorithm_mode = multicast.Mode.MERGER
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
@@ -525,7 +718,7 @@ def test_baseline_bottom_up_signal_simple_path():
   setup()
   controller = appleseed.fault_tolerant_controller()
   #controller.adjacency = h6s10_adjancency
-  controller.merger_optimization = multicast.Mode.BASELINE
+  controller.algorithm_mode = multicast.Mode.BASELINE
 
   #core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
 
@@ -543,7 +736,7 @@ def test_baseline_bottom_up_signal_simple_path():
   data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(2,3),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
   backup = multicast.BackupTree(**data)
   
-  primary.backup_trees.append(backup)
+  primary.backup_trees[(2,3)] = backup
 
   expected_result = [8,7,2]
   
@@ -554,7 +747,7 @@ def test_baseline_bottom_up_signal_trees1():
   
   setup()
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.BASELINE
+  controller.algorithm_mode = multicast.Mode.BASELINE
   
   # just a simple path
   primary_edges =  [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
@@ -570,7 +763,7 @@ def test_baseline_bottom_up_signal_trees1():
   data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
   backup = multicast.BackupTree(**data)
   
-  primary.backup_trees.append(backup)
+  primary.backup_trees[(1,2)] = backup
 
   #result = backup.compute_nodes_to_signal((2,3))
   
@@ -584,7 +777,7 @@ def test_baseline_bottom_up_signal_trees2():
   
   setup()
   controller = appleseed.fault_tolerant_controller()
-  controller.merger_optimization = multicast.Mode.BASELINE
+  controller.algorithm_mode = multicast.Mode.BASELINE
   
   # just a simple path
   primary_edges = [(1,2),(2,3),(3,4),(3,5),(4,6),(5,7),(5,8)]
@@ -600,8 +793,7 @@ def test_baseline_bottom_up_signal_trees2():
   data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
   backup = multicast.BackupTree(**data)
   
-  primary.backup_trees.append(backup)
-
+  primary.backup_trees[(1,2)] = backup
   
   expected_result = [10,9,1]
   
@@ -622,7 +814,8 @@ def launch ():
   test_baseline_bottom_up_signal_trees1()
   test_baseline_bottom_up_signal_trees2()
   
-  merger_test_names = ["test_backups_h6s9_3trees()","test_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
+  merger_test_names = ["test_backups_h6s11()\t", "test_backups_h6s9_3trees()","test_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
+  test_backups_h6s11()
   test_backups_h6s9_3trees()
   test_h6s9()
   test_h6s10()
