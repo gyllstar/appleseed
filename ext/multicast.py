@@ -280,45 +280,6 @@ def mark_backup_tree_edges(controller):
         edge.add_backup_tree(btree.id,btree.backup_edge)
    
 
-def tag_upstream(tree_id,u_node,u_link,in_tag,in_set,d_node,d_link,outport):
-  """ Try to see if we can apply the value at 'u'.  This is messy!!  """
-  if not u_node.is_host and len(in_set) == 1 and len(d_link.trees) > 1:
-    # check that all other d_link trees are not using in a value for an incoming link to 'd'.  if this is the case, then we don't tag_upstream
-    for tid in d_link.trees:
-      if tid == tree_id: continue
-      match = False
-      for in_link in d_node.in_links:
-        if in_link == u_link: continue
-        if len(in_link.trees) == 1 and tid in in_links.trees:
-          match = True
-          break
-      if match == False:
-        return False
-    
-    if in_tag == None:
-      print "\t\twrite value upstream, keep downstream"
-      tag = -1
-      if d_link.value != None:
-        tag = d_link.value
-      else: 
-        new_tag = 11
-        tag = new_tag
-      
-      u_port = controller.adjacency[(u_node.id,d_node.id)]
-      u_node.update_new_tags(u_link.trees_hash_key,tag,u_port)
-      u_link.value = tag
-      d_link.value = tag
-      d_node.update_keep_tags(u_link.trees_hash_key,tag,outport)
-      return True
-    elif d_node.keep_tags.has_key(u_link.trees_hash_key):
-      print "keep tags"
-      d_link.value = in_tag
-      d_node.update_keep_tags(u_link.trees_hash_key,in_tag,outport)
-      return True
-    else:
-      msg = "error when trying to apply value at the upstream node"
-      raise appleseed.AppleseedError(msg)
-  return False
 
 def generate_new_tag():
   return new_tags.pop()
@@ -606,18 +567,6 @@ def match_backup_tag_downstream(trees, d_node,tag,backup_edge):
   remove_backup_flow_entry_duplicates(d_node, tag, backup_edge)
 
     
-def depracted_match_backup_tag_downstream(trees, d_node,tag,backup_edge):
-  
-  flow_entry = FlowEntry()
-  flow_entry.match_tag = tag
-  
-  # SELF-NOTE: this is where i might need to merge the FlowEntry with the empty match tag
-  if not d_node.has_backup_match_tag(tag,backup_edge):
-    d_node.add_backup_flow_entry(backup_edge,flow_entry)
-  
-  for tree_id in trees:
-    d_node.add_backup_treeid_rule(backup_edge,tree_id,flow_entry)
-  
 def match_tag_downstream(trees, d_node,tag):
   
   flow_entry = FlowEntry()
@@ -880,12 +829,12 @@ def create_single_backup_tree_tagging_indices(controller,btree,btree_id,root_nod
       elif primary_tree_tagging:
         primary_tree_overlap(controller,u_node,d_node,btree,btree_id,backup_edge)
       else:
-        create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge)
+        create_backup_group_single_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge)
       
       log.debug( "\t- visited s%s" %(d_node.id))
   log.debug( "----------------------------------------------------------------------------\n"  )
 
-def create_backup_tree_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge):
+def create_backup_group_single_tags(controller,u_node,d_node,btree,btree_id,u2d_link,backup_edge):
   """ We are at 'u_node' looking at (u,d), i.e., 'u2d_link', and checking each of d_nodes's outlinks for common forwarding behavior among tree using (u,d) """
   bak_in_trees = u2d_link.backup_trees[backup_edge]
   shared_bak_trees = set()
@@ -1128,7 +1077,6 @@ def find_unique_backup_edges(controller):
         backup_set.add(btree)
         backup_map[edge] = backup_set
         
-  #print "Unique Backup Edges = %s" %(backup_map)
   return backup_map
          
       
@@ -1166,10 +1114,6 @@ def create_merged_backup_tree_flows(controller):
   if controller.backup_tree_mode == BackupMode.PROACTIVE:
     preinstall_all_merged_backup_flows(controller)
   
-  #print "Exit for Backup Tree Merger Tagging development."
-  #os._exit(0)
-  
-  #depracated_create_install_merged_flow_rules(controller)      
       
 def create_install_merged_primary_tree_flows(controller):
   """ Merger Algorithm for primary trees """
@@ -1182,11 +1126,6 @@ def create_install_merged_primary_tree_flows(controller):
   
   install_ofp_merge_rules(controller)
   
-  #print "OS EXIT AT create_install_merged_primary_tree_flows() "
-  #os._exit(0)
-  
-  #depracated_create_install_merged_flow_rules(controller)      
-      
   log.debug("\t\t  INSTALLED MERGED FLOW ENTRIES!!!! ")
   
 
@@ -1225,31 +1164,6 @@ def append_rewrite_dst_ofp_action(controller,switch_id,rule,switch_ports,tag_por
   return rule
     
 
-def create_keep_tag_ofp_rules(node,controller):
-  """ Generate rules to keep value.  Match on the value.  Action is to send in the outport."""
-  keep_rules = {}  # value --> ofp_msg
-  for tag in node.keep_tags.keys():
-    outports = node.keep_tags[tag].outports
-    trees = node.keep_tags[tag].trees
-    
-    msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
-    msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, dl_dst = tag)
-    msg.priority = default_keep_tag_flow_priority
-    
-    # one tree should do since all trees, by definition, use the same outports
-    id = iter(trees).next()
-    tree = get_tree(id, controller)
-    if tree.is_leaf_node(node.id):
-      host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-      msg = append_rewrite_dst_ofp_action(controller,node.id,msg, switch_ports, outports, dst_addresses,host_to_port_map) 
-    else:
-      for prt in outports:
-        msg.actions.append(of.ofp_action_output(port = prt))
-    
-    keep_rules[tag] = msg
-    
-  return keep_rules
-
 def find_tree_root_and_mcast_addr(tree_id,controller):
   
   for tree in controller.primary_trees:
@@ -1258,65 +1172,7 @@ def find_tree_root_and_mcast_addr(tree_id,controller):
   msg = "Error looking up the root and multicast address of T%s.  " %(tree_id)
   raise appleseed.AppleseedError(msg)
 
-def depracted_create_new_ether_dst_ofp_rule(root_addr,mcast_addr,outports,ether_dst):
-  """ Create and return rule that:
-          - match: using the multicast src address and destination address, and
-          - action:  write the Ethernet dest field (either a value or the original value) and forward packets out the list of ports"""
-  msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
-  msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
-  
-  new_tag_action = of.ofp_action_dl_addr.set_dst(ether_dst)
-  msg.actions.append(new_tag_action)
-  for prt in outports:
-    msg.actions.append(of.ofp_action_output(port = prt))
-  msg.priority = default_new_tag_flow_priority
-  
-  return msg
 
-
-def create_new_tag_rules(node,keep_rules,controller):
-  """ Generate rules to create new value. Create a flow entry with (a) match -- destination ip address, (b) action -- write the new-value.  If a tree
-      has multiple new_tag entries, the actions are combined into a single rule for said tree.
-      
-      Old Steps:
-        (1) We check the remove_tags list to see if we can create flow entries that have: (a) match - based on the remove-value and (b) action - write new value.  
-            This allows us to avoid having to have a flow entry rule for each multicast destination address to write the new value.
-        (2) If we can update a keep_tag rule that uses the remove-value than add an action to write the new value for the relevant outport
-        (3) Worst case, we create a flow entry with (a) match -- destination ip address, (b) action -- write the new-value
-  """
-  new_tag_rules = {} # tree_id --> ofp_msg
-  for new_tag in node.new_tags.keys():
-    support = node.new_tags[new_tag]
-    for tree_id in support.trees:
-      tree = get_tree(tree_id, controller)
-      root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
-      new_prts = support.outports
-      
-      existing_rule = None
-      #check if we can append the action to an existing rule for this tree
-      if new_tag_rules.has_key(tree_id):
-        existing_rule = new_tag_rules[tree_id]
-      
-      if tree.is_leaf_node(node.id):
-        host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-        if existing_rule != None:
-          append_rewrite_dst_ofp_action(controller,node.id,existing_rule, switch_ports,new_prts,dst_addresses,host_to_port_map,new_tag)
-          new_tag_rules[tree_id] = existing_rule
-        else:
-          rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
-          rule.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
-          rule.priority = default_new_tag_flow_priority
-          rule = append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports,new_prts,dst_addresses,host_to_port_map,new_tag)
-          new_tag_rules[tree_id] = rule
-      else:
-        if existing_rule != None:
-          append_ether_dst_ofp_action(existing_rule, new_tag, new_prts)
-          new_tag_rules[tree_id] = existing_rule
-        else:
-          rule = depracted_create_new_ether_dst_ofp_rule(root_addr,mcast_addr,new_prts,new_tag)
-          new_tag_rules[tree_id] = rule
-      
-  return new_tag_rules
 
 def append_ether_dst_ofp_action(ofp_rule,ether_dst,ports):
   """ Applies the value (ethernet dest address) and adds actions to send outports."""
@@ -1326,78 +1182,6 @@ def append_ether_dst_ofp_action(ofp_rule,ether_dst,ports):
     ofp_rule.actions.append(of.ofp_action_output(port = prt))
   return ofp_rule
                             
-def split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller):
-  """ Handle case where a remove_tag is also found in keep_tag index.  This means that we are at node where the trees (or some subset thereof) branch on at least one out-link
-      but share one out-link. In this case we need to split the keep_tag into a separate flow entry for each tree in keep_tag.
-      
-      10/22: tried to refactor this so the keep_tag match rule was reused when a subset (or all) trees in keep_tag have the same new_tag rule.
-  """
-  for rm_tag in node.remove_tags.keys():
-    if node.keep_tags.has_key(rm_tag):
-      keep_support = node.keep_tags[rm_tag]
-      for tree_id in keep_support.trees:
-        tree = get_tree(tree_id, controller)
-        
-        if new_tag_rules.has_key(tree_id):
-          rule = new_tag_rules[tree_id]
-          if tree.is_leaf_node(node.id):
-            host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-            append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports, keep_support.outports, dst_addresses,host_to_port_map,rm_tag) 
-          else:
-            append_ether_dst_ofp_action(rule, rm_tag, keep_support.outports)
-          print "Node %s Split Keep Tag 1" %(node.id)
-          
-        elif no_tag_rules.has_key(tree_id):
-          rule = no_tag_rules[tree_id]
-          if tree.is_leaf_node(node.id):
-            host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-            append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports, keep_support.outports, dst_addresses,host_to_port_map,rm_tag) 
-          else:
-            append_ether_dst_ofp_action(rule, rm_tag, keep_support.outports)
-          print "Node %s Split Keep Tag 2" %(node.id)
-          
-        else:
-          root_addr,mcast_addr = find_tree_root_and_mcast_addr(tree_id, controller)
-          #rule = depracted_create_new_ether_dst_ofp_rule(root_addr, mcast_addr, keep_support.outports, rm_tag)
-          rule = of.ofp_flow_mod(command=of.OFPFC_ADD)
-          rule.match = of.ofp_match(dl_type = ethernet.IP_TYPE,  nw_src=root_addr, nw_dst = mcast_addr)
-          rule.priority = default_new_tag_flow_priority
-          if tree.is_leaf_node(node.id):
-            host_to_port_map, switch_ports, dst_addresses = tree.compute_host_port_maps(node.id)
-            append_rewrite_dst_ofp_action(controller,node.id,rule, switch_ports, keep_support.outports, dst_addresses,host_to_port_map,rm_tag) 
-          else:
-            append_ether_dst_ofp_action(rule, rm_tag, keep_support.outports)
-          new_tag_rules[rm_tag] = rule
-          print "Node %s Split Keep Tag 3" %(node.id)
-      del keep_rules[rm_tag]
-      
-  return keep_rules,new_tag_rules,no_tag_rules
-    
-    
-def in_link_is_no_tag(node,tree_id):
-  """ Check node's in_links to see if any link is traversed only by tree_id.   
-      
-      Note that the node can only have one in_link used by tree_id because otherwise we would have a loop.
-  """
-  tree_set = set()
-  tree_set.add(tree_id)
-  for in_link in node.in_links: 
-    if in_link.trees == tree_set:
-      return True
-  return False
-  
-def depracated_create_install_merged_flow_rules(controller):
-  """ Use the value indices of each node to create the merged flow entriies and install them."""
-  for node in nodes.values():
-    keep_rules = create_keep_tag_ofp_rules(node,controller)
-    new_tag_rules = create_new_tag_rules(node,keep_rules,controller)
-    no_tag_rules = create_no_tag_rules(node,new_tag_rules,controller)
-    
-    node.keep_rules, node.new_tag_rules,node.no_tag_rules = split_keep_tag_rule(node,keep_rules,new_tag_rules,no_tag_rules,controller)
-    
-    node.print_rule_summary()
-    node.install_rules(controller)
-    
 def create_node_edge_objects(controller):
   """ Merger Algorithm for primary trees """
   
@@ -2276,203 +2060,3 @@ class FlowEntry():
     out_str += "}"
     return out_str
     
-class DepracatedNode ():
-  
-  def __init__(self,id,is_host):
-    self.id = id
-    self.is_host = is_host
-    self.in_links = set()
-    self.out_links = set()
-    self.keep_tags = {}  # (value) --> TagSupport
-    self.remove_tags = {}  # (value) --> TagSupport
-    self.new_tags = {} # (value) --> TagSupport
-    self.no_tags = {} # tree_id --> [outport1, outport2, ...]
-    
-    self.backup_keep_tags = {}  # (backup_edge) --> {(value) --> TagSupport}
-    self.backup_remove_tags = {}  # (backup_edge) --> {(value) --> TagSupport}
-    self.backup_new_tags = {} # (backup_edge) --> {(value) --> TagSupport}
-    
-    self.keep_rules = {}   # value --> ofp_rule
-    self.new_tag_rules = {} # tree_id --> ofp_rule
-    self.no_tag_rules = {} # tree_id --> ofp_rule
-    
-  
-  def install_rules(self,controller):
-    """ TODO: may want to move this function the MulticastTree """
-    for rule in self.keep_rules.values():
-      utils.send_msg_to_switch(rule, self.id)
-      controller.cache_flow_table_entry(self.id, rule)
-    for rule in self.new_tag_rules.values():
-      utils.send_msg_to_switch(rule, self.id)
-      controller.cache_flow_table_entry(self.id, rule)
-    for rule in self.no_tag_rules.values():
-      utils.send_msg_to_switch(rule, self.id)
-      controller.cache_flow_table_entry(self.id, rule)
-    
-  def has_tree_set_new_tag(self,trees):
-    for tag in self.new_tags.keys():
-      support = self.new_tags[tag]
-      if support.trees == trees:
-        return True,tag
-    return False,-1
-  
-  def update_no_tags(self,tree_id,outport):
-    if self.no_tags.has_key(tree_id):
-      val_list = self.no_tags[tree_id]
-      val_list.append(outport)
-    else:
-      val_list = [outport]
-      self.no_tags[tree_id] = val_list
-      
-  def update_remove_tags(self,tree_id,in_tag,outport):
-    if self.remove_tags.has_key(in_tag):
-      tag_support = self.remove_tags[in_tag]
-      tag_support.outports.add(outport)
-    else:
-      tag_support = TagSupport()
-      tag_support.trees.add(tree_id)
-      tag_support.outports.add(outport)
-      self.remove_tags[in_tag] = tag_support
-  
-  def update_new_tags(self,trees,tag,outport):
-    if self.new_tags.has_key(tag):
-      tag_support = self.new_tags[tag]
-      tag_support.outports.add(outport)
-    else:
-      tag_support = TagSupport()
-      tag_support.trees = trees
-      tag_support.outports.add(outport)
-      self.new_tags[tag] = tag_support  
-          
-  def update_keep_tags(self,trees,in_tag,outport):
-    if self.keep_tags.has_key(in_tag):
-      tag_support = self.keep_tags[in_tag]
-      tag_support.outports.add(outport)
-    else:
-      tag_support = TagSupport()
-      tag_support.trees = trees
-      tag_support.outports.add(outport)
-      self.keep_tags[in_tag] = tag_support
-      
-  def update_keep_backup_tags(self,backup_trees,backup_edge,tag,outport):
-    if self.backup_keep_tags.has_key(backup_edge):
-      backup_tags = self.backup_keep_tags[backup_edge]
-      if backup_tags.has_key(tag):
-        tag_support = backup_tags[tag]
-        tag_support.outports.add(outport)
-      else:
-        tag_support = TagSupport()
-        tag_support.trees = backup_trees
-        tag_support.outports.add(outport)
-        backup_tags[tag] = tag_support
-    else:
-      tag_support = TagSupport()
-      tag_support.trees = backup_trees
-      tag_support.outports.add(outport)
-      self.backup_keep_tags[backup_edge] = {tag:tag_support}
-  
-  def update_new_backup_tags(self,backup_trees,backup_edge,tag,outport):
-    if self.backup_new_tags.has_key(backup_edge):
-      backup_tags = self.backup_new_tags[backup_edge]
-      if backup_tags.has_key(tag):
-        tag_support = backup_tags[tag]
-        tag_support.outports.add(outport)
-      else:
-        tag_support = TagSupport()
-        tag_support.trees = backup_trees
-        tag_support.outports.add(outport)
-        backup_tags[tag] = tag_support
-    else:
-      tag_support = TagSupport()
-      tag_support.trees = backup_trees
-      tag_support.outports.add(outport)
-      self.backup_new_tags[backup_edge] = {tag:tag_support} 
- 
-  def update_remove_backup_tags(self,backup_trees,backup_edge,tag,outport):
-    if self.backup_remove_tags.has_key(backup_edge):
-      backup_tags = self.backup_remove_tags[backup_edge]
-      if backup_tags.has_key(tag):
-        tag_support = backup_tags[tag]
-        tag_support.outports.add(outport)
-      else:
-        tag_support = TagSupport()
-        tag_support.trees = backup_trees
-        tag_support.outports.add(outport)
-        backup_tags[tag] = tag_support
-    else:
-      tag_support = TagSupport()
-      tag_support.trees = backup_trees
-      tag_support.outports.add(outport)
-      self.backup_remove_tags[backup_edge] = {tag:tag_support}      
-  
-  def print_rule_summary(self):
-    if self.is_host: 
-      return
-    print "----------------------------------------------- n%s rules -----------------------------------------------" %(self.id)
-    str = "Keep Tag: "
-    for tag in self.keep_rules:
-      ofp_rule = self.keep_rules[tag]
-      num_actions = len(ofp_rule.actions)
-      str += "value=%s, # actions= %s; \t" %(tag,num_actions)
-    print str
-    str = "New Tag: "
-    for tree_id in self.new_tag_rules:
-      ofp_rule = self.new_tag_rules[tree_id]
-      num_actions = len(ofp_rule.actions)
-      str += "New Tag: T%s, # actions= %s; \t" %(tree_id,num_actions)
-    print str
-    str = "No Tag: "
-    for tree_id in self.no_tag_rules:
-      ofp_rule = self.no_tag_rules[tree_id]
-      num_actions = len(ofp_rule.actions)
-      str += "T%s, # actions= %s; \t" %(tree_id,num_actions)
-    print str
-    print "-----------------------------------------------------------------------------------------------------------"  
-  
-  def print_rule_summary_old(self):
-    if self.is_host: 
-      return
-    print "----------------------------------------------- n%s rules -----------------------------------------------" %(self.id)
-    str = "Keep Tag: "
-    for tag in self.keep_rules:
-      ofp_rule = self.keep_rules[tag]
-      num_actions = len(ofp_rule.actions)
-      str += "value=%s, # actions= %s; \t" %(tag,num_actions)
-    print str
-    str = "New Tag: "
-    for tree_id in self.new_tag_rules:
-      ofp_rule = self.new_tag_rules[tree_id]
-      num_actions = len(ofp_rule.actions)
-      str += "New Tag: T%s, # actions= %s; \t" %(tree_id,num_actions)
-    print str
-    str = "No Tag: "
-    for tree_id in self.no_tag_rules:
-      ofp_rule = self.no_tag_rules[tree_id]
-      num_actions = len(ofp_rule.actions)
-      str += "T%s, # actions= %s; \t" %(tree_id,num_actions)
-    print str
-    print "-----------------------------------------------------------------------------------------------------------"
-  
-  def __str__(self):
-    type = "s"
-    if self.is_host: type = "h"
-    return "%s%s; in = %s; out=%s " %(type,self.id,self.in_links,self.out_links)
-  
-  def __repr__(self):
-    return self.__str__()    
-    
-    
-class TagSupport():
-  
-  def __init__(self):
-    self.trees = set()
-    self.outports = set()
-    
-  def __str__(self):
-    return "T = %s, ports = %s" %(self.trees,self.outports)
-  
-  def __repr__(self):
-    return self.__str__()  
-    
-  
-  
