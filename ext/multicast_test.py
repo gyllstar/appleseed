@@ -2,6 +2,9 @@
 
 
 """ Tests the Merger algorithm.
+
+To run this test run "pox.py --no-cli multicast_test"
+
 """
 
 
@@ -209,6 +212,46 @@ def print_successful_test_results(baseline_test_names,merger_test_names):
     print "**** \t\t (%s)  %s  \t\t\t\t\t\t\t\t\t\t\t\t ****" %(cnt,test_name)
   print "*****************************************************************************************************************************************************"
   
+
+def test_steiner_arboresence():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_steiner_arboresence() ****"
+  setup()
+  
+  
+  # NICK: this is the adjacency matrix, where each entry is of the form: "(u,d): p" where u is the upstream node, d is the downstream node, and p is the port from u to d
+  #       replace with your adjacency matrix. the port numbers don't matter much for your testing purposes, but ideally should be unique at each node for each of its outgoing links
+  adjacency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, 
+                     (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 
+                     3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4}
+  
+  # NICK: you will probably either (1) have to create your own "mtree" and "measure_pnts_file" or 
+  #                                (2) remove the call to read this files in the constructor of appleseed.fault_tolerant_controller 
+  #      either way you need some way to indicate what the root and terminals are for your multicast group
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.BASELINE
+  controller.adjacency = adjacency
+  
+  # NICK: replace this with the switch ids
+  list_of_switches = [7,8,9,10,11,12,13,14,15]
+  core.openflow_discovery._dps = list_of_switches
+  multicast.compute_primary_trees(controller)
+  
+  #NICK: this dictionary specifies the expected results.  Each entry "a:b" is switch 'a' should have 'b' flow entries for primary trees.  To determine the correct number of flow
+  #      entries for your example, you need to look at each switch, a, and determine in how many multicast trees is 'a' used?  One flow entry is created for each such multicast tree.  
+  #      For example, if switch 7 is used in 3 multicast trees, the dictionary should have the value 7:3
+  expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:2,16:0,17:1}
+  
+  test_name = "test_steiner_arboresence()"
+  check_correct_num_flows(expected_num_flows, test_name)
+
+
+  # NICK: let me know when you are ready to test backup trees and I can add the boierplate test code for you.
+  
+
 
 def test_h6s9():
   print "**** RUNNING MERGER_TEST.test_backups_h6s9() ****"
@@ -437,8 +480,8 @@ def test_backups_h6s11():
   
     #multicast.print_backup_ofp_rules(controller,backup_edge)
   
-  print "OS EXIT AT test_backups_h6s11() "
-  os._exit(0)  
+ # print "OS EXIT AT test_backups_h6s11() "
+ # os._exit(0)  
   
 
 def test_backups_h6s9_3trees():
@@ -809,7 +852,8 @@ def launch ():
   core.registerNew(appleseed.fault_tolerant_controller)
   
   
-  baseline_test_names = ["test_baseline_bottom_up_signal_simple_path","test_baseline_bottom_up_signal_trees1()","test_baseline_bottom_up_signal_trees2()",]
+  baseline_test_names = ["test_steiner_arboresence()","test_baseline_bottom_up_signal_simple_path","test_baseline_bottom_up_signal_trees1()","test_baseline_bottom_up_signal_trees2()"]
+  test_steiner_arboresence()
   test_baseline_bottom_up_signal_simple_path()
   test_baseline_bottom_up_signal_trees1()
   test_baseline_bottom_up_signal_trees2()
