@@ -20,4 +20,7 @@ pypy/
 ext/bak/
 ext/topos/topology_generator-depracted.py
 *-output.csv
-
+/startVM.sh
+/closeVM.sh
+/appleseed.sublime-project
+/appleseed.sublime-workspace

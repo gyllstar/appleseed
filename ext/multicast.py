@@ -19,6 +19,7 @@ from types import NoneType
 from compiler.ast import nodes
 log = core.getLogger("multicast")
 import os
+import SteinerArborescence
 
 
 #################### Start of Hard-coded IP addresses and config files ####################
@@ -184,8 +185,14 @@ def generate_multicast_groups(controller):
   # add each multicast group to controller.mcast_groups
   
 def compute_primary_trees(controller):
-  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approxiation goes. """
+  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approximation goes. """
   num_switches = len(core.openflow_discovery._dps)
+  
+  Steiner_Arb = SteinerArborescence()
+  
+  # Compute a Primary Tree for each Mcast Group given. 
+  # Then for each Primary Tree, compute all possible backups (for Min-Control).
+  # For min-flow, we might need to be more flexible so we should build accordingly.
   
   for mcast_addr in controller.mcast_groups.keys():
     
@@ -200,56 +207,57 @@ def compute_primary_trees(controller):
     #       this will replace the hard-coded mutlicast trees created below (although keep those hard-coded trees because they are good for testing :) )
     
     # NICK: the commented code below is some starter code to set up the call the computing the Steiner Arboresence
-#    flag_to_run_nicks_code = True
-#    if flag_to_run_nicks_code == True:
-#      adjacency_list = controller.adjacency.keys()
-#      root_id = find_node_id(root)
-#      terminal_ids = list()
-#      for host in terminal_hosts:
-#        terminal_ids.append(find_node_id(host))
-#      
-#      # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
-#      edges = compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
-#      
-#      data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
-#      tree = PrimaryTree(**data)
-#      controller.primary_trees.append(tree)
-#      continue
+   
+   flag_to_run_nicks_code = True
+   if flag_to_run_nicks_code == True:
+     adjacency_list = controller.adjacency.keys()
+     root_id = find_node_id(root)
+     terminal_ids = list()
+     for host in terminal_hosts:
+       terminal_ids.append(find_node_id(host))
+     
+     # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
+     edges = Steiner_Arb.compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
+     
+     data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+     tree = PrimaryTree(**data)
+     controller.primary_trees.append(tree)
+     continue
     
-    # some temporary hard-coding going on here 
-    if mcast_addr == mcast_ip_addr1:
-      if num_switches == 4 and len(end_hosts) == 3: #H3S4
-        edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
-      elif num_switches == 6 and len(end_hosts) == 3: #H9S6
-        edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
-      elif num_switches == 8 and len(end_hosts) == 4: #H4S8
-        edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
-      elif num_switches == 9 and len(end_hosts) == 4: #H6S9
-        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-      elif num_switches == 10 and len(end_hosts) == 4: #H6S10
-        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-      else:
-        msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-        log.error(msg)
-        raise appleseed.AppleseedError(msg)
-    elif mcast_addr == mcast_ip_addr2:
-      if num_switches == 6 and len(end_hosts) == 6:  #H9S6
-        edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
-      elif num_switches == 9 and len(end_hosts) == 5: #H6S9
-        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-      elif num_switches == 10 and len(end_hosts) == 5: #H6S10
-        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-      else:
-        msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-        log.error(msg)
-        raise appleseed.AppleseedError(msg)
-    elif mcast_addr == mcast_ip_addr3:
-      if num_switches == 10 and len(end_hosts) == 4: #H6S10
-        edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
-    data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
-    tree = PrimaryTree(**data)
+    # # some temporary hard-coding going on here 
+    # if mcast_addr == mcast_ip_addr1:
+    #   if num_switches == 4 and len(end_hosts) == 3: #H3S4
+    #     edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
+    #   elif num_switches == 6 and len(end_hosts) == 3: #H9S6
+    #     edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
+    #   elif num_switches == 8 and len(end_hosts) == 4: #H4S8
+    #     edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
+    #   elif num_switches == 9 and len(end_hosts) == 4: #H6S9
+    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+    #   elif num_switches == 10 and len(end_hosts) == 4: #H6S10
+    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+    #   else:
+    #     msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+    #     log.error(msg)
+    #     raise appleseed.AppleseedError(msg)
+    # elif mcast_addr == mcast_ip_addr2:
+    #   if num_switches == 6 and len(end_hosts) == 6:  #H9S6
+    #     edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
+    #   elif num_switches == 9 and len(end_hosts) == 5: #H6S9
+    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+    #   elif num_switches == 10 and len(end_hosts) == 5: #H6S10
+    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+    #   else:
+    #     msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+    #     log.error(msg)
+    #     raise appleseed.AppleseedError(msg)
+    # elif mcast_addr == mcast_ip_addr3:
+    #   if num_switches == 10 and len(end_hosts) == 4: #H6S10
+    #     edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
+    # data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+    # tree = PrimaryTree(**data)
     
-    controller.primary_trees.append(tree)
+    # controller.primary_trees.append(tree)
 
 def get_node(node_id):
   """ Either create a new Node object or retrieve one if it already exists in nodes """
