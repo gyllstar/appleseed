@@ -140,6 +140,9 @@ class fault_tolerant_controller (EventMixin):
     
     self.primary_trees = [] 
     
+    # each element of the set is a tuple of 2 integers: (u,d) where u is the upstream switch id and d the downstream switch id
+    self.monitored_links  = set()
+    
     #self.backup_tree_mode = multicast.BackupMode.REACTIVE
     self.backup_tree_mode = multicast.BackupMode.PROACTIVE
     
@@ -251,12 +254,12 @@ class fault_tolerant_controller (EventMixin):
         
         event.connection.send(msg.pack())
         
-        start_pcount,u_switch_id,d_switch_ids = pcount.check_start_pcount(dpid,match.nw_src,match.nw_dst,self)
-        
-        if start_pcount:
-          msg="started PCOUNT at normal processing with u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids,match.nw_src,match.nw_dst)
-          log.info(msg)
-          pcount.start_pcount_thread(u_switch_id, d_switch_ids, match.nw_src, match.nw_dst,self)
+#        start_pcount,u_switch_id,d_switch_ids = pcount.depracated_check_start_pcount(dpid,match.nw_src,match.nw_dst,self)
+#        
+#        if start_pcount:
+#          msg="started PCOUNT at normal processing with u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids,match.nw_src,match.nw_dst)
+#          log.info(msg)
+#          pcount.depracated_start_pcount_thread(u_switch_id, d_switch_ids, match.nw_src, match.nw_dst,self)
     else:
       log.error("no ARP entry at switch s%s for dst=%s" %(dpid,dstaddr))
        
@@ -337,6 +340,7 @@ class fault_tolerant_controller (EventMixin):
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
             multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
+            pcount.start_pcount(self,self.monitored_links,self.primary_trees)
             return
           
           if multicast.is_mcast_address(a.protodst,self):
@@ -346,10 +350,6 @@ class fault_tolerant_controller (EventMixin):
             utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             
             return 
-          
-          # to avoid ping-ponging ARP requests after primary trees installed
-#          if len(self.primary_trees)>1:
-#            return
           
           # Learn or update port/MAC info for the SOURCE address 
           if a.protosrc in self.arpTable[dpid]:

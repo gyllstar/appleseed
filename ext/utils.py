@@ -26,7 +26,7 @@ from pox.lib.addresses import IPAddr
 from pox.lib.packet.arp import arp
 from pox.lib.packet.ethernet import ethernet
 import multicast,appleseed
-import csv,time
+import csv,time,os
 
 
 
@@ -116,6 +116,30 @@ def read_mtree_file(controller):
     #  controller.mcast_groups[key] = entry
     
 def read_flow_measure_points_file(controller):
+  """ Assumes each line has the following format: 'downstream-switch,upstream-switch, ...'.  Creates a tuple (upstream-switch,downstream-switch) and
+      adds this to multicast.monitored_links.  All values in the link after the second comma are ignored.
+  """
+  
+  measure_file = "ext/topos/%s" %(multicast.measure_pnts_file_str)
+  log.debug("using measure points file: %s" %(measure_file))
+  
+  for line_list in csv.reader(open(measure_file)):
+    val_list = list()
+    
+    # check if it's a comment line
+    if "#" in line_list[0]:
+      continue
+    
+    downstream_node_id = int(line_list[0])
+    upstream_node_id = int(line_list[1])
+    link = (upstream_node_id,downstream_node_id)
+    print link
+    
+    controller.monitored_links.add(link)
+    
+  #print "\n \n MONITORED LINKS = %s.  Exiting." %(controller.monitored_links)
+  #os._exit(0) 
+def depracated_read_flow_measure_points_file(controller):
   """
   read and parse a file specifying which switches are tagging and those that are downstream nodes counting tagged packets
   

@@ -17,13 +17,14 @@ from pox.lib.addresses import IPAddr,EthAddr
 from pox.lib.packet.ethernet import ethernet
 from pox.lib.packet.ipv4 import ipv4
 from pox.lib.packet.arp import arp
-import utils, appleseed
+import utils, appleseed, multicast
+from multicast import Tag, TagType
 
 import pox.openflow.libopenflow_01 as of
 
 from pox.lib.revent import *
 
-import time, random
+import time, random, os
 
 global_vlan_id=0
 
@@ -33,49 +34,81 @@ PCOUNT_CALL_FREQUENCY=PCOUNT_WINDOW_SIZE+5
 PROPOGATION_DELAY=1 #seconds
 
 
-def start_pcount_thread(u_switch_id, d_switch_ids, nw_src, nw_dst,controller):
+def get_u_and_d_flows(controller,monitored_link,relevant_trees):
+  """ Get the flows at the upstream node and downstream node of monitored_link parameter.  relevant_trees are ones using the monitored link"""
+  
+  u_outport_to_d = controller.adjacency[monitored_link]
+  u_flow_match_tags = set()
+  d_flow_match_tags = set()
+  
+  if controller.algorithm_mode == multicast.Mode.BASELINE:
+    for tree in relevant_trees:
+      match_tag = Tag(TagType.MCAST_DST_ADDR,tree.mcast_address)
+      u_flow_match_tags.add(match_tag)
+      d_flow_match_tags.add(match_tag)
+    return u_flow_match_tags,d_flow_match_tags
+  if controller.algorithm_mode == multicast.Mode.MERGER:
+    u_node_id = monitored_link[0]
+    u_node = multicast.nodes[u_node_id]
+    for flow_entry in u_node.flow_entries:
+      if flow_entry.outport_tags.has_key(u_outport_to_d):
+        u_flow_match_tags.add(flow_entry.match_tag)
+  
+    # Look up the match_tag values at d for each releveant tree
+    d_node_id = monitored_link[1]
+    d_node = multicast.nodes[d_node_id]
+    for tree in relevant_trees:
+      flow_entry = d_node.treeid_rule_map[tree.id]
+      d_flow_match_tags.add(flow_entry.match_tag)  # Not sure if this ensures that no duplicate match_tags are added to the set
+    
+    return u_flow_match_tags,d_flow_match_tags
+  
+def start_pcount(controller,monitored_links,primary_trees):
+  """ Find all primary trees using the monitored links and, for each monitored link (u,d), create PCount sessions for the set of flow entry used to forward packets along (u,d)"""
+  
+  
+  for monitored_link in monitored_links:
+    # (1) find the primary trees using each monitored link
+    relevant_trees = set()
+    for tree in primary_trees:
+      if tree.uses_link(monitored_link):
+        relevant_trees.add(tree)
+    
+    if len(relevant_trees) == 0:
+      msg = "No primary trees found using monitored link %s, therefore no pcount sessions initiated." %(monitored_link)
+      
+    # (2) find the flow entry corresponding to each PT from (1) at u and d.
+    u_outport_to_d = controller.adjacency[monitored_link]
+    u_flow_match_tags,d_flow_match_tags = get_u_and_d_flows(controller, monitored_link, relevant_trees)
+    log.debug("\nU_FLOW_MATCH_TAGS for l=(%s,%s)" %(monitored_link[0],monitored_link[1]))
+    for tag in u_flow_match_tags:
+      log.debug( "\t - %s" %(tag))
+    log.debug( "\nD_FLOW_MATCH_TAGS for l=(%s,%s)" %(monitored_link[0],monitored_link[1]))
+    for tag in d_flow_match_tags:
+      log.debug( "\t - %s" %(tag))
+  
+  start_pcount_thread(controller,u_switch_id, d_switch_id, u_flow_match_tags,d_flow_match_tags)
+  #os._exit(0)
+
+  
+    # (3) create synchronous Pcount sessions for each flow entry from (2)
+
+def start_pcount_thread(controller,u_switch_id,d_switch_id,u_flow_match_tags,d_flow_match_tags):
   """ Sets a timer to start a PCount session
   
   Keyword Arguments:
   u_switch_id -- upstream switch id
   d_switch_id -- downstream switch id
-  nw_src -- IP address of the source node, used to recognize the flow
-  nw_dst -- IP address of destination node, used to recognize the flow
-  
+  u_flow_match_tags -- match tags at u_switch_id
+  d_flow_match_tags -- match tags at d_switch_id
   """
   pcounter = PCountSession()
   
   # likely can make this more dynamic by finding the most downstream nodes along the measurement path to determine the strip_vlan_switch_ids
-  strip_vlan_switch_ids = controller.flow_strip_vlan_switch_ids[(nw_src,nw_dst)]
+  strip_vlan_switch_ids = d_switch_id
   
-  Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [u_switch_id, d_switch_ids,strip_vlan_switch_ids,controller.depracated_mtree_dstream_hosts,nw_src, 
-                                                               nw_dst, controller.flowTables,controller.arpTable, PCOUNT_WINDOW_SIZE,controller],recurring=True,selfStoppable=True)
+  Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [controller,u_switch_id,d_switch_id,u_flow_match_tags,d_flow_match_tags,PCOUNT_WINDOW_SIZE],recurring=True,selfStoppable=True)
 
-  
-def check_start_pcount(d_switch_id,nw_src,nw_dst,controller):
-  """ Checks if the given switch for flow (nw_src,nw_dst) is the downstream switch in which we want to trigger a PCount session
-  
-  Keyword Arguments:
-  d_switch_id -- downstream switch id
-  nw_src -- IP address of the source node, used to recognize the flow
-  nw_dst -- IP address of destination node, used to recognize the flow
-  
-  """
-  if not controller.flow_measure_points.has_key(d_switch_id):
-    return False,-1,-1
-  
-  
-  for measure_pnt in controller.flow_measure_points[d_switch_id]:
-    last_indx = len(measure_pnt) -1
-    
-    if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-      dstream_switches = list()
-      dstream_switches.append(d_switch_id)
-      dstream_switches = dstream_switches + measure_pnt[0:last_indx-2]
-      
-      return True,measure_pnt[last_indx-2],dstream_switches  #returns the upstream switch id 
-    
-  return False,-1,-1
 
 def get_tree_measure_points(nw_src,nw_dst,controller):
   """ Checks if the given switch for flow (nw_src,nw_dst) is the downstream switch in which we want to trigger a PCount session
@@ -216,27 +249,23 @@ class PCountSession (EventMixin):
   def __init__ (self):
 
     #  Copy of the version maintained at fault_tolerant_controller.   
-    self.flowTables = {} #for each switch keep track of flow tables (switchId --> flow-table-entry), specifically (dpid --> ofp_flow_mod).
- 
+    #self.depracated_flowTables = {} #for each switch keep track of flow tables (switchId --> flow-table-entry), specifically (dpid --> ofp_flow_mod).
+    #self.depracated_arpTable = {}
+    
     self.current_highest_priority_flow_num = of.OFP_DEFAULT_PRIORITY
-    
-    self.arpTable = {}
+
+    self.controller = None
  
  
-    
-  def pcount_session(self,u_switch_id,d_switch_ids,strip_vlan_switch_ids,mtree_dstream_hosts,nw_src, nw_dst,flow_tables,arpTable,window_size,controller):
+  def pcount_session(self,controller,u_switch_id,d_switch_id,u_flow_match_tags,d_flow_match_tags,window_size):
     """
     Entry point to running a PCount session. Measure the packet loss for flow, f, between the upstream switch and  and downstream switches, for a specified window of time
     
-    Keyword argumetns
+    Keyword arguments
     u_switch_id --  the id of the upstream switch, 
-    d_switch_ids -- list of ids of the downstream switches
-    strip_vlan_switch_ids -- the ids of nodes that should remove the VLAN tag from matched packets
-    depracated_mtree_dstream_hosts -- the downstream hosts in teh multicast tree
-    nw_src -- IP address of the source host (used to identify the flow to run the pcount session over)
-    nw_dst -- IP address of the destination host, possibly a multicast address) (used to identify the flow to run the pcount sesssion over)
-    flow_tables -- list of all flow tables, copied from fault_tolerant_controller
-    arpTable -- copy of the ARP table
+    d_switch_id -- list of ids of the downstream switches
+    u_flow_match_tags -- match tags at u_switch_id
+    d_flow_match_tags -- match tags at d_switch_id
     window_size -- window is the length (in seconds) of the sampling window
     
     """
@@ -245,18 +274,14 @@ class PCountSession (EventMixin):
     
     global global_vlan_id
     global_vlan_id+=1
-    self.flowTables = flow_tables
-    self.arpTable = arpTable
+    self.controller = controller
 
     current_time = time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime())
-    log.debug("(%s) started pcount session between switches (s%s,%s) and flow (src=%s,dest=%s,vlan_id=%s) lasting %s seconds" %(current_time,u_switch_id,d_switch_ids,nw_src,nw_dst,global_vlan_id,window_size)) 
-    self._start_pcount_session(u_switch_id, d_switch_ids,strip_vlan_switch_ids,mtree_dstream_hosts, nw_src, nw_dst,global_vlan_id)
-
+    log.debug("(%s) started pcount session along (s%s,%s) lasting %s seconds" %(current_time,u_switch_id,d_switch_id,global_vlan_id,window_size)) 
+    self._start_pcount_session(u_switch_id,d_switch_id,u_flow_match_tags,d_flow_match_tags,global_vlan_id)
     
+    Timer(window_size, self._stop_pcount_session_and_query, args = [u_switch_id,d_switch_id,u_flow_match_tags,d_flow_match_tags,global_vlan_id]) 
     
-    Timer(window_size, self._stop_pcount_session_and_query, args = [u_switch_id, d_switch_ids,nw_src,nw_dst,global_vlan_id])
-
-
 
   def _query_tagging_switch(self,switch_id,vlan_id,nw_src,nw_dst):
     """ Issue a query to the tagging switch, using (vlan_id,nw_src,nw_dst) to identify the flow """
