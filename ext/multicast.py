@@ -62,6 +62,7 @@ mtree_file_str="mtree-h6s9-2t.csv"
 
 depracted_installed_mtrees=[] #list of multicast addresses with an mtree already installed
 
+garbage_collection_total = 0
 nodes = {} # node_id --> Node
 edges = {} #(u,d) --> Edge
 default_ustar_backup_flow_priority= of.OFP_DEFAULT_PRIORITY + 1
@@ -991,6 +992,37 @@ def activate_merger_backups(controller,affected_trees,failed_link):
         safe_priority = find_safe_flow_priority(controller, node_id)
         node.install_precomputed_backup_ofp_rules(controller,backup_edg,safe_priority)
         signaled_nodes.add(node_id)
+        
+  garbage_collect_merger_rules(failed_link,affected_trees)
+
+def garbage_collect_merger_rules(failed_link,affected_trees):
+  "For now just computes how many flows can be garbage collected."
+  
+  node_garbage_flows = {}
+  node_affected_trees = {}
+  
+  # for each node, build a list of primary trees with a stale flow
+  for ptree in affected_trees:
+    backup_tree = ptree.backup_trees[failed_link]
+    garbage_nodes = ptree.find_garbage_collect_nodes(failed_link,backup_tree)
+    for node_id in garbage_nodes:
+      if node_affected_trees.has_key(node_id):
+        node_affected_trees[node_id].add(ptree.id)
+      else:
+        ptrees = set()
+        ptrees.add(ptree.id)
+        node_affected_trees[node_id] = ptrees
+        node_garbage_flows[node_id] = set()   #intialize
+        
+  for node_id in node_affected_trees.keys():
+    node = nodes[node_id]
+    has_garbage,garbage_flow = node.garbage_collect_merge_flows(ptree.id,failed_link,node_affected_trees[node_id])
+    if has_garbage:
+      node_garbage_flows[node_id].add(garbage_flow)
+  
+  global garbage_collection_total
+  garbage_collection_total = len(node_garbage_flows.values())
+  #print node_garbage_flows
 
 def generate_all_backup_ofp_rules(controller):
   """ For each backup_edge, create the OpenFlow rules for each Primary Tree using the backup edge.  The OpenFlow rules are created using the tagging indices created earlier.
@@ -1532,11 +1564,23 @@ class PrimaryTree (MulticastTree):
           self.install_leaf_flow(id)
         else:
           self.install_nonleaf_flow(id)
+   
+  def find_garbage_collect_nodes(self,backup_edge,backup_tree):
     
-  def garbage_collect_stale_flows(self):
-    """ Remove primary tree flows made obsolete because the backup tree was activated."""
-    msg = "Primary.garbage_collect_stale_flows() is not yet implemented"
-    log.info(msg)
+    unique_edges =  [link for link in self.edges if link not in backup_tree.edges]
+    upstream_nodes = set([link[0] for link in unique_edges]) 
+    
+    return upstream_nodes
+    
+  def garbage_collect_stale_baseline_flows(self,backup_edge,backup_tree):
+    """ Remove primary tree flows made obsolete because the backup tree was activated.
+    
+        For now, don't actually delete the flows, just update the garbage collection stats."""
+    
+    garbage_collect_nodes = self.find_garbage_collect_nodes(backup_edge, backup_tree)
+    
+    global garbage_collection_total
+    garbage_collection_total+=len(garbage_collect_nodes)
     
   def __str__(self):
     return "Tree %s, %s-->%s" %(self.id,self.mcast_address,self.edges)
@@ -1639,11 +1683,7 @@ class BackupTree (MulticastTree):
     log.info(msg)
     print msg
     
-    self.primary_tree.garbage_collect_stale_flows()
-
-  def activate_merger_backups(self):
-    """ Merger Algorithm for recovery."""    
-    # nothing here because implemented in Nodes
+    self.primary_tree.garbage_collect_stale_baseline_flows(self.backup_edge,self)
     
   def activate(self):
     """ Activate the backup tree.  For Proactive, signal the most upstream node.  For reactive signal all relevant nodes bottom up. 
@@ -1651,9 +1691,9 @@ class BackupTree (MulticastTree):
         Note: this means that we are signalling one tree at-a-time to activate backups, rather than iterating over the set of switches and sending messages
               for all backup trees to that switch before moving to the next switch.
     """
-    if self.controller.algorithm_mode == Mode.MERGER:
-      self.activate_merger_backups()
-    elif self.controller.algorithm_mode == Mode.BASELINE:
+#    if self.controller.algorithm_mode == Mode.MERGER:
+#      self.activate_merger_backups()
+    if self.controller.algorithm_mode == Mode.BASELINE:
       self.activate_baseline_backups()
     elif self.controller.algorithm_mode == Mode.MERGER_DEPRACATED:
       raise appleseed.AppleseedError("No implementation of backup tree activation for MERGER_DEPRACATED mode.")
@@ -1816,7 +1856,33 @@ class Node ():
     self.preinstalled_backup_ofp_rules = {}   # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are installed
     self.most_upstream_node_ofp_rules = {}    # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed
     self.precomputed_backup_ofp_rules = {}    # For Reactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed.
-  
+    
+    
+  def garbage_collect_merge_flows(self,ptree_id,backup_edge,all_affected_primary_trees):
+    """ For now just returns the flow so we can compute the stats of # flows to remove"""
+    flow_entry = self.treeid_rule_map[ptree_id]
+    
+    for pt_id in self.treeid_rule_map.keys():
+     # if pt_id == ptree_id: continue
+      if pt_id in all_affected_primary_trees: continue
+      pt_flow = self.treeid_rule_map[pt_id]
+      if flow_entry.match_tag == pt_flow.match_tag:
+        return False,None
+    
+    if not self.backup_flow_entries.has_key(backup_edge):
+      return True,flow_entry.match_tag
+    
+    # if we are at u* node
+    if self.backup_treeid_rule_map[backup_edge].has_key(ptree_id):
+      print flow_entry.match_tag
+      return True,flow_entry.match_tag
+    
+    for backup_flow in self.backup_flow_entries[backup_edge]:
+      if flow_entry.match_tag == backup_flow.match_tag:
+        return False,None
+      
+    return True,flow_entry.match_tag
+    
   def update_flow_entry_priority(self,tree_id,new_priority):
     
     flow_entry = self.treeid_rule_map[tree_id]

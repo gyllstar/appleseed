@@ -24,6 +24,8 @@ def setup():
   
   multicast.nodes.clear()
   multicast.edges.clear()
+  global garbage_collection_total
+  garbage_collection_total = 0
 
 
 def get_num_type_matches(node_id,type):
@@ -196,7 +198,20 @@ def check_correct_num_backup_flows(expected_num_flows,backup_edge,test_name):
       print msg
       os._exit(0)      
 
+def check_garbage_nodes_correct(primary_tree_id,actual_garbage_nodes,expected_garbage_nodes,test_name):
+  
+  if actual_garbage_nodes != expected_garbage_nodes:
+    msg = "\n [TEST-ERROR] %s, Primary Tree T%s should have garbage collection nodes = %s but has garbage nodes = %s. Exiting. "  %(test_name,primary_tree_id, expected_garbage_nodes,actual_garbage_nodes)
+    print msg
+    os._exit(0)      
 
+
+def check_num_garbage_flows_correct(expected_num_garbage_flows,test_name):
+  if multicast.garbage_collection_total != expected_num_garbage_flows:
+    msg = "\n [TEST-ERROR] %s, Should have %s garbage collection flows but has %s. Exiting. "  %(test_name,expected_num_garbage_flows,multicast.garbage_collection_total)
+    print msg
+    os._exit(0)   
+  
 def print_successful_test_results(baseline_test_names,merger_test_names):
   
   print "\n\n************************************************** THESE TESTS ALL COMPLETED CORRECTLY **************************************************************" 
@@ -253,7 +268,7 @@ def test_steiner_arboresence():
   
 
 
-def test_h6s9():
+def test_backups_h6s9():
   print "**** RUNNING MERGER_TEST.test_backups_h6s9() ****"
   setup()
   h6s9_adjancency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4}
@@ -292,11 +307,22 @@ def test_h6s9():
   
   multicast.compute_backup_trees(controller)
   
+  
+  set_values = [7,8,10]
+  expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
   backup_edges = set()
   for ptree in controller.primary_trees:
     for btree in ptree.backup_trees.values():
       edge = btree.backup_edge
       backup_edges.add(edge)
+      garbage_nodes = ptree.find_garbage_collect_nodes(edge,btree)
+      check_garbage_nodes_correct(ptree.id,garbage_nodes,expected_garbage_nodes[ptree.id],test_name)
+      
+  failed_link = (7,8)
+  affected_trees = multicast.find_affected_primary_trees(controller.primary_trees,failed_link)
+  multicast.garbage_collect_merger_rules(failed_link,affected_trees)
+  expected_num_garbage_flows = 3
+  check_num_garbage_flows_correct(expected_num_garbage_flows,test_name)
   
   # includes placeholders
   expected_num_backup_flows = {7:2,8:0,9:1,10:0,11:1,12:2,13:1,14:1,15:0}
@@ -331,7 +357,7 @@ def test_h6s9():
     check_correct_backup_flow_actions(expected_backup_actions, backup_edge, test_name)
     check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, backup_edge, test_name)
   
-  #print "OS EXIT AT test_h6s9() "
+  #print "OS EXIT AT test_backups_h6s9() "
   #os._exit(0)
   
 def test_backups_h6s11():
@@ -379,7 +405,6 @@ def test_backups_h6s11():
   controller.primary_trees.append(tree)  
   controller.mcast_groups[mcast_addr] = [root]+terminal_hosts
   multicast.create_install_merged_primary_tree_flows(controller)
-  print "here 2"
 
   expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:2,16:0,17:1}
   
@@ -435,11 +460,21 @@ def test_backups_h6s11():
 
   multicast.compute_backup_trees(controller)
   
+  set_values = [7,8,10,9]
+  expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
   backup_edges = set()
   for ptree in controller.primary_trees:
     for btree in ptree.backup_trees.values():
       edge = btree.backup_edge
       backup_edges.add(edge)
+      garbage_nodes = ptree.find_garbage_collect_nodes(edge,btree)
+      check_garbage_nodes_correct(ptree.id,garbage_nodes,expected_garbage_nodes[ptree.id],test_name)
+      
+  failed_link = (7,8)
+  affected_trees = multicast.find_affected_primary_trees(controller.primary_trees,failed_link)
+  multicast.garbage_collect_merger_rules(failed_link,affected_trees)
+  expected_num_garbage_flows = 4
+  check_num_garbage_flows_correct(expected_num_garbage_flows,test_name)
   
   # includes placeholders
   expected_num_backup_flows = {7:2,8:0,9:0,10:0,11:1,12:2,13:1,14:1,15:0,16:1,17:2}
@@ -545,11 +580,22 @@ def test_backups_h6s9_3trees():
 
   multicast.compute_backup_trees(controller)
   
+  set_values = [7,8,10]
+  expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
   backup_edges = set()
   for ptree in controller.primary_trees:
     for btree in ptree.backup_trees.values():
       edge = btree.backup_edge
       backup_edges.add(edge)
+      garbage_nodes = ptree.find_garbage_collect_nodes(edge,btree)
+      check_garbage_nodes_correct(ptree.id,garbage_nodes,expected_garbage_nodes[ptree.id],test_name)
+      
+  failed_link = (7,8)
+  affected_trees = multicast.find_affected_primary_trees(controller.primary_trees,failed_link)
+  multicast.garbage_collect_merger_rules(failed_link,affected_trees)
+  expected_num_garbage_flows = 3
+  check_num_garbage_flows_correct(expected_num_garbage_flows,test_name)
+  
   
   # includes placeholders
   expected_num_backup_flows = {7:2,8:0,9:1,10:0,11:1,12:2,13:1,14:1,15:0}
@@ -853,15 +899,15 @@ def launch ():
   
   
   baseline_test_names = ["test_steiner_arboresence()","test_baseline_bottom_up_signal_simple_path","test_baseline_bottom_up_signal_trees1()","test_baseline_bottom_up_signal_trees2()"]
-  test_steiner_arboresence()
+  #test_steiner_arboresence()
   test_baseline_bottom_up_signal_simple_path()
   test_baseline_bottom_up_signal_trees1()
   test_baseline_bottom_up_signal_trees2()
   
-  merger_test_names = ["test_backups_h6s11()\t", "test_backups_h6s9_3trees()","test_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
+  merger_test_names = ["test_backups_h6s11()\t", "test_backups_h6s9_3trees()","test_backups_h6s9()\t\t","test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
   test_backups_h6s11()
   test_backups_h6s9_3trees()
-  test_h6s9()
+  test_backups_h6s9()
   test_h6s10()
   test_h6s10_4trees_order1()
   test_h6s10_4trees_order2()
