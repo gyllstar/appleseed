@@ -52,10 +52,10 @@ def send_msg_to_switch(msg,switch_id):
 
 
 
-def find_nonvlan_flow_outport(flowTables,switch_id,nw_src,nw_dst):
+def find_flow_outports(flowTables,switch_id,nw_src,nw_dst):
   
   if not flowTables.has_key(switch_id):
-    log.error("something wrong at dpg_utils.find_nonvlan_flow_outport(): should be a flow entry cached for switch id = %s" %(switch_id))
+    log.error("something wrong at dpg_utils.find_flow_outports(): should be a flow entry cached for switch id = %s" %(switch_id))
     return -1
   
   outports = []
@@ -133,12 +133,17 @@ def read_flow_measure_points_file(controller):
     downstream_node_id = int(line_list[0])
     upstream_node_id = int(line_list[1])
     link = (upstream_node_id,downstream_node_id)
-    print link
+
+    #link = (12,15)
+
+    src_ip = IPAddr(line_list[-2])
+    dst_ip = IPAddr(line_list[-1])
     
-    controller.monitored_links.add(link)
+    controller.monitored_links[link] = (src_ip,dst_ip)
     
-  #print "\n \n MONITORED LINKS = %s.  Exiting." %(controller.monitored_links)
-  #os._exit(0) 
+  #print "\n \n MONITORED LINKS = %s." %(controller.monitored_links)
+  #os._exit(0)
+      
 def depracated_read_flow_measure_points_file(controller):
   """
   read and parse a file specifying which switches are tagging and those that are downstream nodes counting tagged packets
@@ -147,6 +152,9 @@ def depracated_read_flow_measure_points_file(controller):
   
   TODO: the location of the file is hard-coded, as our the IP addresses of the switches
   """
+  
+  read_monitored_links(controller)
+  
   # file format: downstream-switch1,downstream-switch2, ..., upstream_switch,src-ip,dest-ip
   measure_file = "ext/topos/%s" %(multicast.measure_pnts_file_str)
   log.debug("using measure points file: %s" %(measure_file))
@@ -198,8 +206,6 @@ def depracated_read_flow_measure_points_file(controller):
       entry = list()
       entry.append(val_list)
       controller.flow_measure_points[key] = entry
-    
-
 
 def send_arp_reply(eth_packet,arp_packet,switch_id,inport,mac_addr):
   """ Create an ARP reply packet and send to the requesting switch"""
@@ -236,7 +242,9 @@ def log_pcount_results(controller):
     w.writerow([key, val])
   
 
-def record_pcount_value(vlan_id,nw_src,nw_dst,switch_id,packet_count,is_upstream,total_tag_count_switches,controller):
+
+
+def record_pcount_val_activate_backups(vlan_id,nw_src,nw_dst,switch_id,packet_count,is_upstream,total_tag_count_switches,controller):
   """ Log the Pcount session results and print to console """
   result_list = list()    # vlan_id -> [nw_src,nw_dst, u_switch_id,u_count,d_switch_id,d_count,u_count-dcount]
   if controller.pcount_results.has_key(vlan_id):

@@ -9,14 +9,13 @@ along with some data structures to create and manage multicast trees (Tree and P
 """
 
 
-import utils, appleseed,pcount
+import utils,appleseed,pcount
 from Queue import Queue
 from pox.lib.addresses import IPAddr,EthAddr
 import pox.openflow.libopenflow_01 as of
 from pox.lib.packet.ethernet import ethernet
 from pox.core import core
 from types import NoneType
-from compiler.ast import nodes
 log = core.getLogger("multicast")
 import os
 
@@ -66,9 +65,6 @@ depracted_installed_mtrees=[] #list of multicast addresses with an mtree already
 nodes = {} # node_id --> Node
 edges = {} #(u,d) --> Edge
 default_ustar_backup_flow_priority= of.OFP_DEFAULT_PRIORITY + 1
-default_keep_tag_flow_priority = of.OFP_DEFAULT_PRIORITY 
-default_new_tag_flow_priority = default_keep_tag_flow_priority + 1
-default_no_tag_flow_priority = default_keep_tag_flow_priority + 1
 new_tags = [EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("66:66:66:66:66:37"),EthAddr("66:66:66:66:66:36"),EthAddr("66:66:66:66:66:35"),EthAddr("66:66:66:66:66:34"),
             EthAddr("66:66:66:66:66:33"),EthAddr("66:66:66:66:66:32"),EthAddr("66:66:66:66:66:31"),EthAddr("66:66:66:66:66:30"),EthAddr("66:66:66:66:66:29"),EthAddr("66:66:66:66:66:28"),
             EthAddr("66:66:66:66:66:27"),EthAddr("66:66:66:66:66:26"),EthAddr("66:66:66:66:66:25"),EthAddr("66:66:66:66:66:24"),EthAddr("66:66:66:66:66:23"),EthAddr("66:66:66:66:66:22"),
@@ -960,6 +956,16 @@ def preinstall_all_merged_backup_flows(controller):
   for node in nodes.values():
     for backup_edge in node.preinstalled_backup_ofp_rules.keys():
       node.preinstall_merged_backup_ofp_rules(controller,backup_edge)
+      
+def find_safe_flow_priority(controller,node_id):
+  
+  highest_priority = of.OFP_DEFAULT_PRIORITY 
+  for flow_entry in controller.flowTables[node_id]:
+    #if flow_entry.match.nw_src == self.root_ip_address and flow_entry.match.nw_dst == self.mcast_address:
+    if flow_entry.priority > highest_priority:
+      highest_priority = flow_entry.priority
+
+  return highest_priority + 1
 
 def activate_merger_backups(controller,affected_trees,failed_link):
   
@@ -971,7 +977,8 @@ def activate_merger_backups(controller,affected_trees,failed_link):
       most_upstream.add(ustar)
     for node_id in most_upstream:
       node = nodes[node_id]
-      node.install_most_upstream_ofp_rules(controller,failed_link)
+      safe_priority = find_safe_flow_priority(controller, node_id)
+      node.install_most_upstream_ofp_rules(controller,failed_link,safe_priority)
       
   elif controller.backup_tree_mode == BackupMode.REACTIVE:
     for ptree in affected_trees:
@@ -981,7 +988,8 @@ def activate_merger_backups(controller,affected_trees,failed_link):
         if node_id in signaled_nodes:
           continue
         node = nodes[node_id]
-        node.install_precomputed_backup_ofp_rules(controller,backup_edge)
+        safe_priority = find_safe_flow_priority(controller, node_id)
+        node.install_precomputed_backup_ofp_rules(controller,backup_edg,safe_priority)
         signaled_nodes.add(node_id)
 
 def generate_all_backup_ofp_rules(controller):
@@ -1369,6 +1377,9 @@ class MulticastTree ():
       
     msg = "Error to parent node found for s%s for T%s" %(node_id,self.id)
     raise appleseed.AppleseedError(msg)
+  
+  def uses_link(self,link):
+    return link in self.edges
   
   def find_downstream_neighbors(self,node_id):
     
@@ -1806,6 +1817,16 @@ class Node ():
     self.most_upstream_node_ofp_rules = {}    # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed
     self.precomputed_backup_ofp_rules = {}    # For Reactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed.
   
+  def update_flow_entry_priority(self,tree_id,new_priority):
+    
+    flow_entry = self.treeid_rule_map[tree_id]
+    flow_entry.priority = new_priority
+    
+    for flow in self.flow_entries:
+      if flow.match_tag == flow_entry.match_tag:
+        flow.priority = new_priority
+    return flow_entry
+  
   def has_match_tag(self,match_tag):
     for flow_entry in self.flow_entries:
       if flow_entry.match_tag == match_tag:
@@ -1932,13 +1953,15 @@ class Node ():
         else:
           self.add_preinstalled_backup_ofp_rule(backup_edge, rule)
           
-  def install_precomputed_backup_ofp_rules(self,controller,backup_edge):
+  def install_precomputed_backup_ofp_rules(self,controller,backup_edge,safe_priority):
     for ofp_rule in self.precomputed_backup_ofp_rules[backup_edge]:
+      ofp_rule.priority = safe_priority
       utils.send_msg_to_switch(ofp_rule, self.id)
       controller.cache_flow_table_entry(self.id, ofp_rule)
       
-  def install_most_upstream_ofp_rules(self,controller,backup_edge):
+  def install_most_upstream_ofp_rules(self,controller,backup_edge,safe_priority):
     for ofp_rule in self.most_upstream_node_ofp_rules[backup_edge]:
+      ofp_rule.priority = safe_priority
       utils.send_msg_to_switch(ofp_rule, self.id)
       controller.cache_flow_table_entry(self.id, ofp_rule)
      

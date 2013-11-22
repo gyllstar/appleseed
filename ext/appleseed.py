@@ -140,14 +140,14 @@ class fault_tolerant_controller (EventMixin):
     
     self.primary_trees = [] 
     
-    # each element of the set is a tuple of 2 integers: (u,d) where u is the upstream switch id and d the downstream switch id
-    self.monitored_links  = set()
+    # dict: (u,d) --> (src_up,dst_ip). element of the set is a tuple of 2 integers: (u,d) where u is the upstream switch id and d the downstream switch id
+    self.monitored_links  = {}
     
     #self.backup_tree_mode = multicast.BackupMode.REACTIVE
     self.backup_tree_mode = multicast.BackupMode.PROACTIVE
     
-    self.algorithm_mode = multicast.Mode.MERGER
-    #self.algorithm_mode = multicast.Mode.BASELINE
+    #self.algorithm_mode = multicast.Mode.MERGER
+    self.algorithm_mode = multicast.Mode.BASELINE
     
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
@@ -195,10 +195,8 @@ class fault_tolerant_controller (EventMixin):
     for tree in multicast.find_affected_primary_trees(self.primary_trees,failed_link):
       msg = "installing backup tree for mcast_addr = %s for failed link %s" %(tree.mcast_address,failed_link)
       log.info(msg)
-      print msg
-      for backup in tree.backup_trees:
-        if backup.backup_edge == failed_link:
-          backup.activate()
+      backup = tree.backup_trees[failed_link]
+      backup.activate()
     
    
   
@@ -300,20 +298,6 @@ class fault_tolerant_controller (EventMixin):
     
     self.adjacency[(switch_id,host_id)] = port
     
-    # the code block below would allow for a host to be connected to multiple switches
-    #if (switch_id,host_id) not in self.adjacency.keys():
-    #  print "adding [(%s,%s)] = %s " %(switch_id,host_id,port)
-    #  self.adjacency[(switch_id,host_id)] = port
-
-#  def is_mcast_tree_installed(self,mcast_addr):
-#    """ TODO: fixme"""
-#    return False
-#  
-#    for tree in self.primary_trees:
-#      if tree.mcast_address == mcast_addr:
-#        return True
-#      
-#    return False
     
   def _handle_arp_PacketIn(self,event,packet,dpid,inport):
     """ Learns the inport the switch receive packets from the given IP address.  Once the primary trees are installed, all ARP packets are ignored.
@@ -345,7 +329,7 @@ class fault_tolerant_controller (EventMixin):
           
           if multicast.is_mcast_address(a.protodst,self):
             log.debug("hack, because ARP request ARP request is for multicast address (%s), we send a fake mac address is the ARP reply "%(str(a.protodst)))
-            outport = utils.find_nonvlan_flow_outport(self.flowTables,dpid, a.protosrc, a.protodst)
+            outport = utils.find_flow_outports(self.flowTables,dpid, a.protosrc, a.protodst)
             self.arpTable[dpid][a.protodst] = Entry(outport,multicast.mcast_mac_addr)
             utils.send_arp_reply(packet, a, dpid, inport, self.arpTable[dpid][a.protodst].mac)
             
@@ -369,23 +353,6 @@ class fault_tolerant_controller (EventMixin):
               utils.send_arp_reply(packet,a,dpid,inport,self.arpTable[dpid][a.protodst].mac)
               #self.add_switch_to_host_edges(dpid,a.protosrc,inport)
               return
-    
-    if len(self.primary_trees) == 0:
-      return #no-op so we avoid ping-poinging ARP requests for the intitial pings
-    
-    # Didn't know how to answer or otherwise handle this ARP request, so just flood it
-    log.debug("%i %i flooding ARP %s %s => %s" % (dpid, inport,
-     {arp.REQUEST:"request",arp.REPLY:"reply"}.get(a.opcode,
-     'op:%i' % (a.opcode,)), str(a.protosrc), str(a.protodst)))
-
-    msg = of.ofp_packet_out(in_port = inport, action = of.ofp_action_output(port = of.OFPP_FLOOD))
-    if event.ofp.buffer_id is of.NO_BUFFER:
-      # Try sending the (probably incomplete) raw data
-      msg.data = event.data
-    else:
-      msg.buffer_id = event.ofp.buffer_id
-    event.connection.send(msg.pack())
-
 
   def _handle_FlowRemoved (self, event):
     """ Handles the removal of our special flow entry to drop packets during a PCount session.
