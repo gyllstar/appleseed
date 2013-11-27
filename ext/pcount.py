@@ -67,7 +67,6 @@ def start_pcount_thread(controller,u_switch_id,d_switch_ids,flow_src_addr, flow_
   
   pcounter = PCountSession()
   
-  mtree_dstream_hosts = controller.depracated_mtree_dstream_hosts
   Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [u_switch_id, d_switch_ids,strip_vlan_switch_ids,primary_tree,flow_src_addr, 
                                                                flow_dst_addr, controller.flowTables,controller.arpTable, PCOUNT_WINDOW_SIZE,controller],recurring=True,selfStoppable=True)
 
@@ -184,7 +183,6 @@ def handle_switch_query_result (event,controller):
   nw_src=-1
   nw_dst=-1
   
-  print "****** AT handle_switch_query_result() for S%s***" %(switch_id)
   for flow_stat in event.stats: #note that event stats is a list of flow table entries
     
     nw_src = flow_stat.match.nw_src
@@ -311,7 +309,7 @@ class PCountSession (EventMixin):
     self._start_pcount_upstream(primary_tree,u_switch_id,vlan_id, nw_src, nw_dst)  
     
     # (3): start a thread to install a rule which drops packets at u for a short period (this is used to measure time to detect packet loss)
-#    Timer(1, self._install_drop_pkt_flow, args = [u_switch_id,nw_src,nw_dst])
+    Timer(1, self._install_drop_pkt_flow, args = [u_switch_id,nw_src,nw_dst])
     
   def _find_orig_flow_and_clean_cache(self,switch_id,nw_src,nw_dst,primary_tree):
     """ Find a flow matching (nw_src,nw_dst,old_flow_priority), remove it from the cache, and return this value """
