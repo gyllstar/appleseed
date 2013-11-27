@@ -9,15 +9,17 @@ along with some data structures to create and manage multicast trees (Tree and P
 """
 
 
-import utils,appleseed,pcount
 from Queue import Queue
-from pox.lib.addresses import IPAddr,EthAddr
-import pox.openflow.libopenflow_01 as of
-from pox.lib.packet.ethernet import ethernet
 from pox.core import core
+from pox.lib.addresses import IPAddr, EthAddr
+from pox.lib.packet.ethernet import ethernet
 from types import NoneType
-log = core.getLogger("multicast")
 import os
+import pox.openflow.libopenflow_01 as of
+import utils
+import appleseed
+import pcount
+log = core.getLogger("multicast")
 
 
 #################### Start of Hard-coded IP addresses and config files ####################
@@ -72,6 +74,15 @@ new_tags = [EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("6
             EthAddr("66:66:66:66:66:21"),EthAddr("66:66:66:66:66:20"),EthAddr("66:66:66:66:66:19"),EthAddr("66:66:66:66:66:18"),EthAddr("66:66:66:66:66:17"),EthAddr("66:66:66:66:66:16"),
             EthAddr("66:66:66:66:66:15"),EthAddr("66:66:66:66:66:14"),EthAddr("66:66:66:66:66:13"),EthAddr("66:66:66:66:66:12"),EthAddr("66:66:66:66:66:11"),EthAddr("66:66:66:66:66:10")]
 
+backup_tree_ids = [EthAddr("BB:BB:BB:BB:BB:39"),EthAddr("BB:BB:BB:BB:BB:38"),EthAddr("BB:BB:BB:BB:BB:37"),EthAddr("BB:BB:BB:BB:BB:36"),EthAddr("BB:BB:BB:BB:BB:35"),EthAddr("BB:BB:BB:BB:BB:34"),
+            EthAddr("BB:BB:BB:BB:BB:33"),EthAddr("BB:BB:BB:BB:BB:32"),EthAddr("BB:BB:BB:BB:BB:31"),EthAddr("BB:BB:BB:BB:BB:30"),EthAddr("BB:BB:BB:BB:BB:29"),EthAddr("BB:BB:BB:BB:BB:28"),
+            EthAddr("BB:BB:BB:BB:BB:27"),EthAddr("BB:BB:BB:BB:BB:26"),EthAddr("BB:BB:BB:BB:BB:25"),EthAddr("BB:BB:BB:BB:BB:24"),EthAddr("BB:BB:BB:BB:BB:23"),EthAddr("BB:BB:BB:BB:BB:22"),
+            EthAddr("BB:BB:BB:BB:BB:21"),EthAddr("BB:BB:BB:BB:BB:20"),EthAddr("BB:BB:BB:BB:BB:19"),EthAddr("BB:BB:BB:BB:BB:18"),EthAddr("BB:BB:BB:BB:BB:17"),EthAddr("BB:BB:BB:BB:BB:16"),
+            EthAddr("BB:BB:BB:BB:BB:15"),EthAddr("BB:BB:BB:BB:BB:14"),EthAddr("BB:BB:BB:BB:BB:13"),EthAddr("BB:BB:BB:BB:BB:12"),EthAddr("BB:BB:BB:BB:BB:11"),EthAddr("BB:BB:BB:BB:BB:10"),
+            EthAddr("BB:BB:BB:BB:BB:09"),EthAddr("BB:BB:BB:BB:BB:08"),EthAddr("BB:BB:BB:BB:BB:07"),EthAddr("BB:BB:BB:BB:BB:06"),EthAddr("BB:BB:BB:BB:BB:05"),EthAddr("BB:BB:BB:BB:BB:04"),
+            EthAddr("BB:BB:BB:BB:BB:03"),EthAddr("BB:BB:BB:BB:BB:02"),EthAddr("BB:BB:BB:BB:BB:01")]
+
+
 tree_default_tags = {1:EthAddr("AA:AA:AA:AA:AA:01"),2:EthAddr("AA:AA:AA:AA:AA:02"),3:EthAddr("AA:AA:AA:AA:AA:03"),4:EthAddr("AA:AA:AA:AA:AA:04"),5:EthAddr("AA:AA:AA:AA:AA:05"),6:EthAddr("AA:AA:AA:AA:AA:06"),
                      7:EthAddr("AA:AA:AA:AA:AA:07"),8:EthAddr("AA:AA:AA:AA:AA:08"),9:EthAddr("AA:AA:AA:AA:AA:09"),10:EthAddr("AA:AA:AA:AA:AA:10"),11:EthAddr("AA:AA:AA:AA:AA:11"),12:EthAddr("AA:AA:AA:AA:AA:12"),
                      13:EthAddr("AA:AA:AA:AA:AA:13"),14:EthAddr("AA:AA:AA:AA:AA:14"),15:EthAddr("AA:AA:AA:AA:AA:15"),16:EthAddr("AA:AA:AA:AA:AA:16"),17:EthAddr("AA:AA:AA:AA:AA:17"),18:EthAddr("AA:AA:AA:AA:AA:18"),
@@ -90,7 +101,7 @@ def is_mcast_address(dst_ip_address,controller):
   return controller.mcast_groups.has_key(dst_ip_address)
 
 
-def install_rewrite_dst_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,new_dst,switch_ports,controller):
+def install_rewrite_dst_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,new_dst,switch_ports,controller,ofp_match=None,priority=-1):
   """ Creates a flow table rule that rewrites the multicast address in the packet to the IP address of a downstream host.  
   
   Keyword Arguments
@@ -103,7 +114,11 @@ def install_rewrite_dst_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,new_dst,s
   controller -- appleseed controller instance
   """
   msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
-  msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=nw_src, nw_dst = nw_mcast_dst)
+  if ofp_match == None:
+    msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=nw_src, nw_dst = nw_mcast_dst)
+  else:
+    msg.match = ofp_match
+    msg.priority = priority
   
   # add actions for the downstream switches 1st
   for prt in switch_ports:
@@ -138,13 +153,20 @@ def install_rewrite_dst_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,new_dst,s
   utils.send_msg_to_switch(msg, switch_id)
   controller.cache_flow_table_entry(switch_id, msg)
   
-def install_basic_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,priority,controller):
+def install_basic_mcast_flow(switch_id,nw_src,ports,nw_mcast_dst,priority,controller,ofp_match=None):
   """ Install a flow table rule using the multicast destination address and list of outports  """
   msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
-  msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=nw_src, nw_dst = nw_mcast_dst)
+  if ofp_match == None:
+    msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=nw_src, nw_dst = nw_mcast_dst)
+  else:
+    msg.match = ofp_match
   
   for prt in ports:
     msg.actions.append(of.ofp_action_output(port = prt))
+  
+  #print "\n\n"
+  #print msg
+  
   
   if priority > 0:  # if the priority is negative we just take the default value
     msg.priority = priority
@@ -1422,9 +1444,10 @@ class MulticastTree ():
     
     return neighbors
   
-  def compute_host_port_maps(self,node_id):
+  def compute_host_port_maps(self,node_id,neighbors=None):
     """ The node_id must have at least one connected host.  It is possible that a neighbor is a switch (rather than a host)."""
-    neighbors = self.find_downstream_neighbors(node_id)
+    if neighbors == None:
+      neighbors = self.find_downstream_neighbors(node_id)
     
     host_to_port_map= {}
     switch_ports = []
@@ -1449,6 +1472,7 @@ class MulticastTree ():
         switch_ports.append(outport)
     
     return host_to_port_map,switch_ports,dst_addresses
+ 
   
   def install_leaf_flow(self,node_id):
     """ The node_id must have at least one connected host.  It is possible that a neighbor is a switch (rather than a host)."""
@@ -1540,8 +1564,7 @@ class PrimaryTree (MulticastTree):
   def __init__(self, **kwargs):
     MulticastTree.__init__(self, **kwargs)
     self.backup_trees = {} #edge --> BackupTree
-    
-    
+    self.next_bid = 1
     
   def install(self):
     
@@ -1596,24 +1619,47 @@ class BackupTree (MulticastTree):
     self.primary_tree = kwargs["primary_tree"]    # pointer to it's primary tree
     self.backup_edge = kwargs["backup_edge"]      # the edge the tree is backup for
     self.nodes_to_signal = []  # sorted bottom up (i.e., most downstream node is entry 0)
+    self.diverge_nodes = set() # nodes where backup tree diverges from primary tree
+    self.bid = -1   # backup tree id
     self.compute_nodes_to_signal()
+    self.compute_diverge_nodes()
+    self.proactive_activate_msgs = {}  # switch_id --> ofp_msg
+    self.set_bid()
     
+  def set_bid(self):
+    index = self.primary_tree.next_bid * -1  #pull from end of the backup_tree_id list
+    self.bid = backup_tree_ids[index] 
+    self.primary_tree.next_bid+=1
+    
+  def compute_diverge_nodes(self):
+    """  check if any of the nodes_to_signal are in primary tree"""
+    for node_id in self.nodes_to_signal:
+      for p_edge in self.primary_tree.edges:
+        if p_edge[0] == node_id:
+          self.diverge_nodes.add(node_id)
     
   def compute_nodes_to_signal(self):
     """ Precompute the set of nodes we need to signal after a link failure. 
     
-    Find the set of edges in the backup tree but not in the primary tree, and save the upstream node id of each edge
+    For each backup_tree node (non-switch) add any node that has different outports for the primary tree than backup tree.
+    (Old behavior: find the set of edges in the backup tree but not in the primary tree, and save the upstream node id of each edge.)
     """
     if len(self.edges) == 0:
       msg = "Error.  Backup tree has no edges.  Exiting program."
       log.error(msg)
       raise appleseed.AppleseedError(msg)
+    upstream_nodes = set([link[0] for link in self.edges])
+    signal_nodes = []
+    for backup_node in upstream_nodes:
+      if self.is_host(backup_node): continue
+      primary_ports = self.primary_tree.find_outports(backup_node)
+      backup_ports = self.find_outports(backup_node)
+      if primary_ports != backup_ports:
+        signal_nodes.append(backup_node)
+       
+    self.nodes_to_signal = self.sort_nodes_bottom_up(signal_nodes)
     
-    unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
-    upstream_nodes = set([link[0] for link in unique_edges])
-    self.nodes_to_signal = self.sort_nodes_bottom_up(upstream_nodes)
-    
-    
+
     if self.controller.algorithm_mode == Mode.MERGER:
       # add the parent node of most upstream node, if the parent is not a host (EDIT: adding parent even if its a host)
       most_upstream = self.nodes_to_signal[-1]
@@ -1621,8 +1667,52 @@ class BackupTree (MulticastTree):
       self.nodes_to_signal.append(parent)
 #      if not self.is_host(parent):
 #        self.nodes_to_signal.append(parent)
+ 
+  def find_backup_child_nodes(self,node_id):
+    neighbors = []
+    for edge in self.edges:
+      if edge[0] == node_id:
+        neighbors.append(edge[1])
+    
+    return neighbors
+ 
+  def install_nonleaf_diverge_flow(self,node_id,set_priority_flag=False):
+    neighbors = self.find_backup_child_nodes(node_id)
+    
+    outports = []
+    for d_switch in neighbors:
+      outport = self.adjacency[(node_id,d_switch)]
+      
+      if isinstance(outport, NoneType):
+        msg = ("Tree %s want to add install flow for link (%s,%s) which does is not the adjacency list.  It likely that the (%s,%s) was not\n" 
+          "discovered during intialization or the the tree computation algorithm added a non-existent link." %(self,node_id,d_switch,node_id,d_switch))
+        log.error("%s. Exiting Program." %(msg))
+        raise appleseed.AppleseedError(msg)
+      
+      outports.append(outport)
+      
+    # get the priority of other entries corresponding to this flow  
+    priority = -1
+    if set_priority_flag:
+      priority = self.determine_flow_priority(node_id)
+      
+    ofp_match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=self.root_ip_address, nw_dst = self.mcast_address,dl_src=self.bid)
+    
+    #print "called install_basic_mcast_flow(s%s,root=%s,outport=%s,mcast_addr=%s,priority=%s)" %(node_id,self.root_ip_address,outports,self.mcast_address,priority)
+    install_basic_mcast_flow(node_id,self.root_ip_address,outports,self.mcast_address,priority,self.controller,ofp_match)
+    
   
-
+  def install_leaf_diverge_flow(self,node_id):
+    """ The node_id must have at least one connected host.  It is possible that a neighbor is a switch (rather than a host)."""
+    
+    neighbors = self.find_backup_child_nodes(node_id)
+    host_to_port_map, switch_ports, dst_addresses = self.compute_host_port_maps(node_id,neighbors)
+    
+    ofp_match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=self.root_ip_address, nw_dst = self.mcast_address,dl_src=self.bid)
+    
+    priority = self.determine_flow_priority(node_id)    
+    install_rewrite_dst_mcast_flow(node_id, self.root_ip_address, host_to_port_map, self.mcast_address, dst_addresses, switch_ports,self.controller,ofp_match,priority) 
+  
   
   def sort_nodes_bottom_up(self,unsort_node_list):  
     """ Sort the list of nodes bottom up and return a new list """
@@ -1637,19 +1727,74 @@ class BackupTree (MulticastTree):
     
     return bottom_up
   
+  def cache_activate_rule(self,node_id):
+    """ Create and cache a message with higher priority than other flows, that writes the bid"""
+    neighbors = self.find_downstream_neighbors(node_id)
+    
+    outports = []
+    for d_switch in neighbors:
+      outport = self.adjacency[(node_id,d_switch)]
+      outports.append(outport)
+      
+    # set the priority later when its time to actually install the activation rule 
+    
+    msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
+    msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=self.root_ip_address, nw_dst = self.mcast_address)
+  
+    write_bid_action = of.ofp_action_dl_addr.set_src(self.bid)
+    msg.actions.append(write_bid_action)
+    for prt in outports:
+       msg.actions.append(of.ofp_action_output(port = prt))
+       
+    self.proactive_activate_msgs[node_id] = msg
+  
+  
   def preinstall_baseline_backups(self):
-    """ Used by the Proactive Algorithm to preinstall_baseline_backups flow entries.  Signal all nodes in 'self.nodes_to_signal' except the most upstream node"""
     log.debug("Baseline Algorithm: Preinstalling backup tree B%s for l=%s" %(self.id,self.backup_edge))
+    
+    self.preinstall_baseline_basic_rules()
+    self.preinstall_baseline_diverge_rules()
+    
+    # precompute the activatation messages
+    # (1): find the nodes one hop from the root,  (2): create a message with higher priority than other flows, that writes the bid
+    node_levels = self.compute_node_levels()
+    for level_one_node in node_levels[1]:
+      self.cache_activate_rule(level_one_node)
+    
+  def preinstall_baseline_basic_rules(self):
+    """ Used by the Proactive Algorithm to preinstall_baseline_backups flow entries.  Signal all nodes in 'self.nodes_to_signal' except the ones that are in diverge_nodes"""
+    node_levels = self.compute_node_levels()
     for node_id in self.nodes_to_signal:
+      if node_id in self.diverge_nodes or node_id in node_levels[1]: continue
+      
       if self.is_leaf_node(node_id):
-        log.debug("Baseline Algorithm: Preinstalling flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
+        log.debug("Baseline Algorithm: Preinstalling basic flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
         self.install_leaf_flow(node_id)
       else:
-        is_most_upstream = (node_id == self.nodes_to_signal[-1])
-        if is_most_upstream:
-          continue
-        log.debug("Baseline Algorithm: Preinstalling flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
+        #is_most_upstream = (node_id == self.nodes_to_signal[-1])
+        #if is_most_upstream:
+        #  continue
+        log.debug("Baseline Algorithm: Preinstalling basic flow entry at s%s for backup tree B%s for l=%s" %(node_id,self.id,self.backup_edge))
         self.install_nonleaf_flow(node_id)
+  
+  def preinstall_baseline_diverge_rules(self):
+    """ Used by the Proactive Algorithm to preinstall_baseline_backups flow entries at nodes that diverge from the primary tree.  These nodes match using the backup tree id."""
+    node_levels = self.compute_node_levels()
+    for node_id in self.diverge_nodes:
+      if node_id in node_levels[1]: continue
+      if self.is_leaf_node(node_id):
+        log.debug("Baseline Algorithm: Preinstalling flow entry matching at s%s for backup tree B%s for l=%s with bid=%s" %(node_id,self.id,self.backup_edge,self.bid))
+        self.install_leaf_diverge_flow(node_id)
+      else:
+        log.debug("Baseline Algorithm: Preinstalling flow entry at s%s for backup tree B%s for l=%s with bid=%s" %(node_id,self.id,self.backup_edge,self.bid))
+        self.install_nonleaf_diverge_flow(node_id)
+       
+  def proactive_activate(self): 
+    for switch_id in self.proactive_activate_msgs.keys():
+      ofp_msg =  self.proactive_activate_msgs[switch_id]
+      ofp_msg.priority = self.determine_flow_priority(switch_id)    # set this relative to the current flow entry priorities
+      utils.send_msg_to_switch(ofp_msg, switch_id)
+      self.controller.cache_flow_table_entry(switch_id, ofp_msg)
         
   def reactive_install(self):
     """ Reactive Algorithm.  Signal switches bottom up to activate backup tree."""
@@ -1674,14 +1819,10 @@ class BackupTree (MulticastTree):
     if self.controller.backup_tree_mode == BackupMode.REACTIVE:
       self.reactive_install()
     elif self.controller.backup_tree_mode == BackupMode.PROACTIVE:    # only need signal the most upstream node
-      most_upstream_node = self.nodes_to_signal[-1]
-      is_most_upstream = True
-      log.debug("Baseline Algorithm Proactive Mode: Activating backup tree B%s for l=%s by signaling s%s" %(self.id,self.backup_edge,most_upstream_node))
-      self.install_nonleaf_flow(most_upstream_node,is_most_upstream)
+      self.proactive_activate()
     
     msg = "============== Backup Tree Activated =============="
     log.info(msg)
-    print msg
     
     self.primary_tree.garbage_collect_stale_baseline_flows(self.backup_edge,self)
     
