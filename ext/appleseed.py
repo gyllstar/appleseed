@@ -123,17 +123,11 @@ class fault_tolerant_controller (EventMixin):
     # dict.  d_switch_id1 --> list w/ entries (d_switch_id2, d_switch_id3, .... , u_switch_id,nw_src,nw_dst)
     self.flow_measure_points={}  # note this really ought to be (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
     
-    # dictionary: (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
-    #self.tree_measure_points={} 
-    
     #multicast address -> [src,dest1,dest2,...]
     self.mcast_groups = {}
     
     # (src-ip,dst-ip) -> [switch_id1, switch_id2, ...].  list of the most downstream switch_ids in the PCount session
     self.flow_strip_vlan_switch_ids = {}
-    
-    # (src-ip,dst-ip,switch_id) -> [dstream_host1,dstream_host2, ...] 
-    self.depracated_mtree_dstream_hosts = {}
     
     # vlan_id -> [nw_src,nw_dst, u_switch_id,u_count,d_switch_id,d_count,u_count-dcount]
     self.pcount_results = dict()
@@ -252,12 +246,6 @@ class fault_tolerant_controller (EventMixin):
         
         event.connection.send(msg.pack())
         
-#        start_pcount,u_switch_id,d_switch_ids = pcount.depracated_check_start_pcount(dpid,match.nw_src,match.nw_dst,self)
-#        
-#        if start_pcount:
-#          msg="started PCOUNT at normal processing with u_switch_id=%s, d_switch_ids =%s, src=%s, dst=%s" %(u_switch_id, d_switch_ids,match.nw_src,match.nw_dst)
-#          log.info(msg)
-#          pcount.depracated_start_pcount_thread(u_switch_id, d_switch_ids, match.nw_src, match.nw_dst,self)
     else:
       log.error("no ARP entry at switch s%s for dst=%s" %(dpid,dstaddr))
        
