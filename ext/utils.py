@@ -144,68 +144,6 @@ def read_flow_measure_points_file(controller):
   #print "\n \n MONITORED LINKS = %s." %(controller.monitored_links)
   #os._exit(0)
       
-def depracated_read_flow_measure_points_file(controller):
-  """
-  read and parse a file specifying which switches are tagging and those that are downstream nodes counting tagged packets
-  
-  The file is assumed to have the following format: 'downstream-switch1,downstream-switch2, ..., upstream_switch,src-ip,dest-ip'
-  
-  TODO: the location of the file is hard-coded, as our the IP addresses of the switches
-  """
-  
-  read_monitored_links(controller)
-  
-  # file format: downstream-switch1,downstream-switch2, ..., upstream_switch,src-ip,dest-ip
-  measure_file = "ext/topos/%s" %(multicast.measure_pnts_file_str)
-  log.debug("using measure points file: %s" %(measure_file))
-  
-  for line_list in csv.reader(open(measure_file)):
-    val_list = list()
-    
-    # check if it's a comment line
-    if "#" in line_list[0]:
-      continue
-    
-    key = int(line_list[0])
-    cnt=1 # skip the first entry
-    src_index = len(line_list) - 2 # the src-ip address starts at the at the 2nd to last position
-    
-    # (d_switch_id2, d_switch_id3, .... , u_switch_id,nw_src,nw_dst)
-    while cnt < src_index:
-      val_list.insert(cnt-1, int(line_list[cnt]))
-      cnt+=1
-      
-    src_ip = IPAddr(line_list[cnt])
-    dst_ip = IPAddr(line_list[cnt+1])
-    val_list.insert(cnt-1, src_ip)
-    val_list.insert(cnt, dst_ip) 
-    
-    # egregious hard-coding of the most downstream node 
-    if src_ip == multicast.h3 and dst_ip == multicast.mcast_ip_addr1 and key<10:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [4,5]   # should be h1 and h2 adjacent switches
-    elif src_ip == multicast.h3 and dst_ip == multicast.mcast_ip_addr1 and key>10:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [12,13]   
-    elif src_ip == multicast.h4 and dst_ip == multicast.mcast_ip_addr2:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [14,15]
-    elif src_ip == multicast.h3:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [4]
-    elif src_ip == multicast.h1:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [6]
-    elif src_ip == multicast.h5 and dst_ip == multicast.mcast_ip_addr2:
-      controller.flow_strip_vlan_switch_ids[(src_ip,dst_ip)] = [8]
-    else:
-      msg = "something wrong with parsing measurement file %s when finding which switch_id should strip the VLAN tag.  Exiting program." %(measure_file)
-      raise appleseed.AppleseedError(msg)
-      
-      
-    
-    if controller.flow_measure_points.has_key(key):
-      entry = controller.flow_measure_points[key]
-      entry.append(val_list)
-    else:
-      entry = list()
-      entry.append(val_list)
-      controller.flow_measure_points[key] = entry
 
 def send_arp_reply(eth_packet,arp_packet,switch_id,inport,mac_addr):
   """ Create an ARP reply packet and send to the requesting switch"""

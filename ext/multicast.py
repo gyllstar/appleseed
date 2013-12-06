@@ -18,7 +18,7 @@ import os
 import pox.openflow.libopenflow_01 as of
 import utils
 import appleseed
-import pcount
+import pcount_all
 log = core.getLogger("multicast")
 
 
@@ -1301,17 +1301,16 @@ def install_all_trees(controller):
   if controller.algorithm_mode != Mode.BASELINE:
     create_install_merged_primary_tree_flows(controller)
     
-    # TODO: invoke pcount 
   else:   # run baseline
     for tree in controller.primary_trees:
       tree.install()
-      log.info( "============== installed tree = %s" %(tree.mcast_address))
-      try:
-        u_switch_id, d_switch_ids = pcount.get_tree_measure_points(tree.root_ip_address,tree.mcast_address,controller)
-        core.callDelayed(pcount.PCOUNT_CALL_FREQUENCY,pcount.start_pcount_thread,u_switch_id, d_switch_ids,tree.root_ip_address,tree.mcast_address,controller)
-      except appleseed.AppleseedError:
-        log.info("found no flow measurement points for flow = (%s,%s) but continuing operation becasue it assumed that no PCount session is wanted for this flow." %(tree.root_ip_address,tree.mcast_address))
-      
+#      log.info( "============== installed tree = %s" %(tree.mcast_address))
+#      try:
+#        u_switch_id, d_switch_ids = pcount.get_tree_measure_points(tree.root_ip_address,tree.mcast_address,controller)
+#        core.callDelayed(pcount.PCOUNT_CALL_FREQUENCY,pcount.start_pcount_thread,u_switch_id, d_switch_ids,tree.root_ip_address,tree.mcast_address,controller)
+#      except appleseed.AppleseedError:
+#        log.info("found no flow measurement points for flow = (%s,%s) but continuing operation becasue it assumed that no PCount session is wanted for this flow." %(tree.root_ip_address,tree.mcast_address))
+#      
     msg = " ================= Primary Trees Installed ================="
     log.info(msg)
   

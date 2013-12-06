@@ -36,7 +36,7 @@ rather we identify switches by their switch_id and use the flow tables to determ
 """
 
 from pox.core import core
-import pcount
+import pcount_all
 import multicast
 log = core.getLogger("fault_tolerant_controller")
 #log = core.getLogger()
@@ -136,6 +136,9 @@ class fault_tolerant_controller (EventMixin):
     
     # dict: (u,d) --> (src_up,dst_ip). element of the set is a tuple of 2 integers: (u,d) where u is the upstream switch id and d the downstream switch id
     self.monitored_links  = {}
+    
+    # dict: (u,d) --> PCountResults
+    self.pcount_link_results = {}  
     
     #self.backup_tree_mode = multicast.BackupMode.REACTIVE
     self.backup_tree_mode = multicast.BackupMode.PROACTIVE
@@ -312,7 +315,7 @@ class fault_tolerant_controller (EventMixin):
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
             multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
-            pcount.start_pcount(self,self.monitored_links,self.primary_trees)
+            pcount_all.start_pcount(self,self.monitored_links,self.primary_trees)
             return
           
           if multicast.is_mcast_address(a.protodst,self):
@@ -398,10 +401,18 @@ class fault_tolerant_controller (EventMixin):
       
     return
   
+  
+  def handle_d_node_aggregate_flow_stats(self,event):
+    pcount_all.handle_d_node_aggregate_flow_stats(event,self)
 
+  def handle_flow_removed (self,event):
+    switch_id = event.connection.dpid
+    print "AT S%s FLOW REMOVED " %(switch_id)
+    print "S%s PACKET COUNT=%s " %(switch_id,event.ofp.packet_count)
+    
   def handle_flow_stats (self,event):
     """ Process a flow statistics query result from a given switch"""
-    pcount.handle_switch_query_result(event, self)
+    pcount_all.handle_u_node_query_result(event, self)
     
   def _handle_GoingUpEvent (self, event):
     """ When the connection to the controller is established, this function is called to register our components and listeners """
@@ -409,7 +420,9 @@ class fault_tolerant_controller (EventMixin):
     log.debug("Up...")
     
     
+    core.openflow.addListenerByName("AggregateFlowStatsReceived", self.handle_d_node_aggregate_flow_stats)
     core.openflow.addListenerByName("FlowStatsReceived", self.handle_flow_stats)
+    core.openflow.addListenerByName("FlowRemoved", self.handle_flow_removed)
     log.debug("Listening to flow stats ...")
     
     log.debug("configuration files -- measurement points file = %s, mtree file=%s" %(multicast.measure_pnts_file_str,multicast.mtree_file_str))
