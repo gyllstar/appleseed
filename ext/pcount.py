@@ -29,8 +29,8 @@ import time, random, os
 global_vlan_id=0
 
 # in seconds
-PCOUNT_WINDOW_SIZE=10  
-PCOUNT_CALL_FREQUENCY=PCOUNT_WINDOW_SIZE+5
+PCOUNT_WINDOW_SIZE= 4 
+PCOUNT_CALL_FREQUENCY=PCOUNT_WINDOW_SIZE+2
 PROPOGATION_DELAY=1 #seconds
 
 
@@ -181,7 +181,8 @@ def handle_switch_query_result (event,controller):
   packet_count=-1
   vlan_id = -1
   nw_src=-1
-  nw_dst=-1
+  nw_dst=-1 
+ 
   
   for flow_stat in event.stats: #note that event stats is a list of flow table entries
     
@@ -284,7 +285,7 @@ class PCountSession (EventMixin):
           con.send(of.ofp_stats_request(body=of.ofp_flow_stats_request(match=match)))
           #con.send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))  #DPG: temp for debugging so we can see all flow table values
     
-  def _query_counting_switch(self,switch_id,vlan_id,nw_src,nw_dst):
+  def old_query_counting_switch(self,switch_id,vlan_id,nw_src,nw_dst):
     """ Send a query request to the counting switch """
     for con in core.openflow._connections.itervalues():
         if con.dpid == switch_id:
@@ -292,6 +293,18 @@ class PCountSession (EventMixin):
           #print "sent counting stats request to s%s with params=(nw_src=%s, nw_dst=%s, vlan_id=%s)" %(switch_id, nw_src, nw_dst, vlan_id)
           con.send(of.ofp_stats_request(body=of.ofp_flow_stats_request(match=match)))
           #con.send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))  #DPG: temp for debugging so we can see all flow table values
+  
+  def _query_counting_switch(self,switch_id,vlan_id,nw_src,nw_dst):
+    """ Issue a query to the tagging switch, using (vlan_id,nw_src,nw_dst) to identify the flow """
+    for con in core.openflow._connections.itervalues():
+        if con.dpid == switch_id:
+          match = of.ofp_match(dl_type = ethernet.IP_TYPE,dl_vlan=vlan_id)
+          
+          #print "sent tagging stats request to s%s with params=(nw_src=%s, nw_dst=%s, vlan_id=%s)" %(switch_id, nw_src, nw_dst, vlan_id)
+          con.send(of.ofp_stats_request(body=of.ofp_aggregate_stats_request(match=match)))
+          #con.send(of.ofp_stats_request(body=of.ofp_flow_stats_request()))  #DPG: temp for debugging so we can see all flow table values
+
+
 
   def _start_pcount_session(self,u_switch_id,d_switch_ids,strip_vlan_switch_ids,primary_tree,nw_src,nw_dst,vlan_id):
     """ Install flow entries for PCount session and install rule to drop packets (to simulate packet loss)
@@ -307,6 +320,9 @@ class PCountSession (EventMixin):
     
     # (2): tag and count all packets at upstream switch, u
     self._start_pcount_upstream(primary_tree,u_switch_id,vlan_id, nw_src, nw_dst)  
+    
+    # TEMP for verify multiple VLAN tagging nodes
+    self._start_pcount_upstream(primary_tree,u_switch_id,vlan_id, multicast.h1, multicast.mcast_ip_addr1)  
     
     # (3): start a thread to install a rule which drops packets at u for a short period (this is used to measure time to detect packet loss)
     Timer(1, self._install_drop_pkt_flow, args = [u_switch_id,nw_src,nw_dst])
@@ -424,6 +440,66 @@ class PCountSession (EventMixin):
     new_flow_priority = self.current_highest_priority_flow_num   
     
     # (1): turn tagging off at u (reinstall e with higher priority than e'), 
+    #self._reinstall_upstream_flow(u_switch_id, nw_src, nw_dst, new_flow_priority,primary_tree)
+    #self._reinstall_basic_flow_entry(u_switch_id, nw_src, nw_dst, new_flow_priority)
+    
+    # temp remove all flows with VLAN tag
+    #u_switch_msg = of.ofp_flow_mod(command=of.OFPFC_DELETE, flag = of.ofp_flow_mod_flags_rev_map.OFPFF_SEND_FLOW_REM)
+    u_switch_msg = of.ofp_flow_mod(command=of.OFPFC_DELETE, flags = of.OFPFF_SEND_FLOW_REM)
+    vlan_action = of.ofp_action_vlan_vid()
+    vlan_action.vlan_vid = vlan_id 
+    u_switch_msg.actions.append(vlan_action)
+    
+    #u_switch_msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE,dl_vlan=vlan_id)
+    utils.send_msg_to_switch(u_switch_msg , u_switch_id)
+
+    # (2): wait for time proportional to transit time between u and d to turn counting off at d
+    time.sleep(PROPOGATION_DELAY)
+    
+    # (3) query u and d for packet counts
+    self._query_tagging_switch(u_switch_id, vlan_id,nw_src,nw_dst)
+    for d_switch_id in d_switch_ids:
+      self._query_counting_switch(d_switch_id, vlan_id,nw_src,nw_dst)
+    
+    # (4) delete the original flow entries at u (e and e') and d (e and e'')
+    
+    # delete the upstream VLAN tagging flow
+  #  u_switch_msg = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
+  #  u_switch_msg.match,u_switch_msg.priority = self._find_tagging_flow_and_clean_cache(u_switch_id,nw_src,nw_dst,vlan_id)
+  #  utils.send_msg_to_switch(u_switch_msg , u_switch_id)
+ 
+    #delete the original (non tagging) upstream flow
+
+    u_switch_msg2 = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
+    u_switch_msg2.match,old_flow_priority = self._find_orig_flow_and_clean_cache(u_switch_id,nw_src,nw_dst,primary_tree)
+    u_switch_msg2.priority = old_flow_priority
+    utils.send_msg_to_switch(u_switch_msg2 , u_switch_id)
+ 
+    for d_switch_id in d_switch_ids:    
+      # delete the downstream VLAN counting flow
+      d_switch_msg = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
+      d_switch_msg.match,d_switch_msg.priority = self._find_vlan_counting_flow_and_clean_cache(d_switch_id,nw_src,nw_dst,vlan_id)
+      utils.send_msg_to_switch(d_switch_msg , d_switch_id)
+
+  def old_stop_pcount_session_and_query(self,u_switch_id,d_switch_ids,nw_src,nw_dst,vlan_id,primary_tree):
+    """ Stop the PCount session by removing the tagging and counting flows and issuing a query for their corresponding packet counts.
+    
+    The operations to stop PCount takes place in the following order
+      (1)  turn tagging off at the upstream switch by installing a copy of the original flow entry, that matches (nw_src,nw_dst), with higher priority than e' (the tagging flow)
+      (2)  wait for time proportional to transit time between u and d to turn counting off at d (to account for in-transit packets after tagging is shut off)
+      (3)  query upstream and downstream switches for packet counts
+      (4)  delete the upstream tagging flow
+      (5)  delete the original upstream flow used upstream to match packets for our flow (nw_src,nw_dst)
+      (6)  delete the downstream VLAN counting flow
+
+    """
+    current_time = time.strftime("%a, %d %b %Y %H:%M:%S", time.localtime())
+    log.debug("(%s) stopped pcount session between switches (s%s,%s) for flow (src=%s,dst=%s,vlan_id=%s)" %(current_time,u_switch_id,d_switch_ids,nw_src,nw_dst,vlan_id))
+    
+    self.current_highest_priority_flow_num+=1
+    new_flow_priority = self.current_highest_priority_flow_num   
+    
+    # (1): turn tagging off at u (reinstall e with higher priority than e'), 
     self._reinstall_upstream_flow(u_switch_id, nw_src, nw_dst, new_flow_priority,primary_tree)
     #self._reinstall_basic_flow_entry(u_switch_id, nw_src, nw_dst, new_flow_priority)
 
@@ -453,8 +529,7 @@ class PCountSession (EventMixin):
       # delete the downstream VLAN counting flow
       d_switch_msg = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
       d_switch_msg.match,d_switch_msg.priority = self._find_vlan_counting_flow_and_clean_cache(d_switch_id,nw_src,nw_dst,vlan_id)
-      utils.send_msg_to_switch(d_switch_msg , d_switch_id)
-  
+      utils.send_msg_to_switch(d_switch_msg , d_switch_id) 
   def _reinstall_upstream_flow(self,u_switch_id, nw_src, nw_dst, new_flow_priority,primary_tree):
     
     if self.controller.algorithm_mode == multicast.Mode.BASELINE:
@@ -581,6 +656,11 @@ class PCountSession (EventMixin):
     utils.send_msg_to_switch(msg, d_switch_id)
     
     self._cache_flow_table_entry(d_switch_id, msg)
+    
+    # temporary code to check if aggregate queries work
+    temp_msg = of.ofp_flow_mod(command=of.OFPFC_ADD,priority=flow_priority+1)
+    temp_msg.match = of.ofp_match(dl_type = ethernet.IP_TYPE, nw_src=multicast.h1,dl_vlan=vlan_id) 
+    utils.send_msg_to_switch(temp_msg, d_switch_id)
     
   
   def _append_downstream_actions(self,primary_tree,d_switch_id,msg,strip_vlan_switch_ids,nw_src,nw_dst):

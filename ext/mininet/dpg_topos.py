@@ -19,6 +19,37 @@ from argparse import ArgumentParser
 from mininet.util import dumpNodeConnections
 
 
+class PCountTopo( Topo ):
+    "Simple topology example."
+
+    def __init__(self,loss,num_flows):
+      super(PCountTopo,self).__init__()  
+      self.loss = loss
+      self.generate(loss,num_flows)
+
+    def generate(self,loss,m):
+      "Create custom topo."
+
+
+      # Add hosts and switches
+	  u = self.addSwitch( 's%s' %(2*m+1))
+	  d = self.addSwitch( 's%s' %(2*m+2))
+	  self.addLink(u,d)
+	
+	  for i in range(1,m+1):
+	  	host_str = 'h%s' %(i)
+		host = self.addHost(host_str)
+		self.addLink(host,u)
+	  
+	  for i in range(m+1,2*m+1):
+	  	host_str = 'h%s' %(i)
+		host = self.addHost(host_str)
+		self.addLink(host,d)
+
+
+
+
+
 class H6S10( Topo ):
     "Simple topology example."
 

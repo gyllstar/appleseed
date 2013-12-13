@@ -19,6 +19,7 @@ import pox.openflow.libopenflow_01 as of
 import utils
 import appleseed
 import pcount_all
+import time
 log = core.getLogger("multicast")
 
 
@@ -1286,7 +1287,32 @@ def create_node_edge_objects(controller):
     nodes[d_id] = d
     edges[(u_id,d_id)]= ud
     edges[(d_id,u_id)] = du
-   
+    
+def install_pcount_unicast_flows(controller):
+  """ Used by PCount Experiments"""
+  #log.debug("sleeping for 2 seconds before installing unicast flows")
+  #time.sleep(2)
+  num_hosts_half = int(pcount_all.PCOUNT_NUM_UNICAST_FLOWS)
+  u_id = int(num_hosts_half * 2) +1
+  d_id = u_id+1
+  
+  controller.monitored_links[(u_id,d_id)] = (True,True)
+  controller.pcount_link_results[(u_id,d_id)] = set()
+  
+  log.debug("about to create primary trees for unicast flows")
+  # create fake primary tree with flow entry at u and d for each (host i,host 10 i pair)
+  for src_id in range(1,num_hosts_half+1):
+    dst_id = src_id + num_hosts_half
+    src_host = find_host_ip_addr(src_id) 
+    dst_host = find_host_ip_addr(dst_id)
+    edges = [(src_id,u_id),(u_id,d_id),(d_id,dst_id)]
+    terminal_hosts = [dst_host]
+    data = {"edges":edges, "mcast_address":dst_host, "root":src_host, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+    tree = PrimaryTree(**data)
+    controller.primary_trees.append(tree)
+    log.debug("installing primary tree for unicast flow (%s,%s)" %(src_id,dst_id))
+    tree.install()
+
 def install_all_trees(controller):
   """  (1) Compute and install the primary trees. 
        (2) Triggers a pcount session after a 5 second delay (using a timer)
@@ -1394,6 +1420,15 @@ def find_node_id(ip_address):
   id = parse[-1]
   return int(id) 
      
+     
+def find_host_ip_addr(node_id):
+  """ Takes the IP Address of a node and returns its node id number. 
+  
+  We asssume that the last value in IP address corresponds to the node id. For example, IP address of
+  10.0.0.8 has node id of 8"
+  """
+  ip_str = '10.0.0.%s' %(node_id)
+  return IPAddr(ip_str)
 
 def find_affected_primary_trees(primary_trees,failed_link):
   """ Find all primary trees using the given failed_link and return as a list"""

@@ -261,3 +261,20 @@ def record_pcount_val_activate_backups(vlan_id,nw_src,nw_dst,switch_id,packet_co
         
     controller.pcount_results[vlan_id] = result_list
     log_pcount_results(controller)
+    
+    
+def hasConverged(array,confPercent,withinMeanPerc):
+    """ check if confidence interval for the values in the array (skipping the 1st value) have
+    fallen within the 'withinMean' range of the mean for the array.  if so return True """
+    
+    mean = stats.computeMean(array)
+    
+    confIntervalVal = stats.computeConfIntervalVal(array,confPercent)
+    
+    
+    withinMean = withinMeanPerc * mean
+    
+    if confIntervalVal <= withinMean:
+        return True,mean,confIntervalVal
+    
+    return False,mean,confIntervalVal

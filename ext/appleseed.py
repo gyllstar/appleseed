@@ -61,8 +61,6 @@ INSTALL_PRIMARY_TREES_DELAY = 20  #delay of 10 seconds (from the time the first 
 INSTALL_PRIMARY_TREE_TRIGGER_IP = IPAddr("10.99.99.99")
 LINK_TIMEOUT = 1000 # time the discovery module waits before considering a link removed
 
-packets_dropped_threshold = 5
-
 class Entry (object):
   """
   Not strictly an ARP entry.
@@ -91,7 +89,6 @@ class AppleseedError(Exception):
     Exception.__init__(self, *args, **kwargs)
 
 
-
 class fault_tolerant_controller (EventMixin):
   """ This is the controller application.  Each network switch is implemented as an L3 learning switch supporting ARP and PCount. 
   
@@ -106,6 +103,7 @@ class fault_tolerant_controller (EventMixin):
   """
   
   def __init__ (self):
+
     # For each switch, we map IP addresses to Entries
     self.arpTable = {}
 
@@ -137,14 +135,20 @@ class fault_tolerant_controller (EventMixin):
     # dict: (u,d) --> (src_up,dst_ip). element of the set is a tuple of 2 integers: (u,d) where u is the upstream switch id and d the downstream switch id
     self.monitored_links  = {}
     
-    # dict: (u,d) --> PCountResults
+    # dict: (u,d) --> set[PCountResults], initiated when unicast flows are installed
     self.pcount_link_results = {}  
+
+    
+    self.num_monitor_flows = pcount_all.PCOUNT_NUM_MONITOR_FLOWS
     
     #self.backup_tree_mode = multicast.BackupMode.REACTIVE
     self.backup_tree_mode = multicast.BackupMode.PROACTIVE
     
     #self.algorithm_mode = multicast.Mode.MERGER
     self.algorithm_mode = multicast.Mode.BASELINE
+
+    if pcount_all.IS_PCOUNT_EXP:
+      self.algorithm_mode = multicast.Mode.BASELINE
     
     
     # TODO: this should be refactored to be statistics between 2 measurement points.  currently this lumps together all loss counts, which is problematic when we have
@@ -156,8 +160,9 @@ class fault_tolerant_controller (EventMixin):
     self.pkt_dropped_curr_sampling_window = 0
     self.turn_pcount_off = False
     
-    utils.read_flow_measure_points_file(self)
-    utils.read_mtree_file(self)
+    if not pcount_all.IS_PCOUNT_EXP:
+      utils.read_flow_measure_points_file(self)
+      utils.read_mtree_file(self)
     
    
     
@@ -178,10 +183,6 @@ class fault_tolerant_controller (EventMixin):
       self.flowTables[dpid].append(flow_entry)
 
 
-  def check_install_backup_trees(self,monitored_link,pkt_loss_cnt):
-    """ Checks if the pkt_loss_cnt exceeds a threshold""" 
-    return pkt_loss_cnt > packets_dropped_threshold
-         
   def activate_backup_trees(self,failed_link):
     
     if self.algorithm_mode == multicast.Mode.MERGER:
@@ -224,6 +225,9 @@ class fault_tolerant_controller (EventMixin):
     # Try to forward
     dstaddr = packet.next.dstip
     srcaddr = packet.next.srcip
+
+    #if pcount_all.IS_PCOUNT_EXP:
+    #  return
     
     if dstaddr in self.arpTable[dpid]:
       # We have info about what port to send it out on...
@@ -307,17 +311,23 @@ class fault_tolerant_controller (EventMixin):
     if a.prototype == arp.PROTO_TYPE_IP:
       if a.hwtype == arp.HW_TYPE_ETHERNET:
         if a.protosrc != 0:
-          
           if a.protodst == INSTALL_PRIMARY_TREE_TRIGGER_IP:
+
             if len(self.primary_trees) > 0:
               return
             
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
-            multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
-            pcount_all.start_pcount(self,self.monitored_links,self.primary_trees)
+	    print msg
+            if pcount_all.IS_PCOUNT_EXP:
+              log.debug( "\n INSTALLING UNICAST FLOWS")
+              multicast.install_pcount_unicast_flows(self)
+              pcount_all.start_pcount(self,self.monitored_links,self.primary_trees,pcount_all.PCOUNT_NUM_MONITOR_FLOWS)
+            else:
+              multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
+              pcount_all.start_pcount(self,self.monitored_links,self.primary_trees)
             return
-          
+           
           if multicast.is_mcast_address(a.protodst,self):
             log.debug("hack, because ARP request ARP request is for multicast address (%s), we send a fake mac address is the ARP reply "%(str(a.protodst)))
             outport = utils.find_flow_outports(self.flowTables,dpid, a.protosrc, a.protodst)
@@ -332,18 +342,37 @@ class fault_tolerant_controller (EventMixin):
               log.info("%i %i RE-learned %s", dpid,inport,str(a.protosrc))
           else:
             log.debug("%i %i learned %s", dpid,inport,str(a.protosrc))
-            
+          log.debug("adding %s to s%s ARP table" %(str(a.protosrc),dpid)) 
           self.arpTable[dpid][a.protosrc] = Entry(inport, packet.src)
          
 
           if a.opcode == arp.REQUEST:
-            #print "s%s protosrc=%s, protodst=%s" %(dpid,a.protosrc,a.protodst)
+            log.debug("Adding switch to hsot edges for s%s protosrc=%s, protodst=%s" %(dpid,a.protosrc,a.protodst))
             self.add_switch_to_host_edges(dpid,a.protosrc,inport)
             
             if a.protodst in self.arpTable[dpid]:
+	      log.debug("sending ARP reply")
               utils.send_arp_reply(packet,a,dpid,inport,self.arpTable[dpid][a.protodst].mac)
               #self.add_switch_to_host_edges(dpid,a.protosrc,inport)
               return
+
+    if len(self.primary_trees) == 0 and pcount_all.IS_PCOUNT_EXP:
+      return
+    
+    # Didn't know how to answer or otherwise handle this ARP request, so just flood it
+    log.debug("%i %i flooding ARP %s %s => %s" % (dpid, inport,
+     {arp.REQUEST:"request",arp.REPLY:"reply"}.get(a.opcode,
+     'op:%i' % (a.opcode,)), str(a.protosrc), str(a.protodst)))
+    
+    msg = of.ofp_packet_out(in_port = inport, action=of.ofp_action_output(port=of.OFPP_FLOOD))
+    if event.ofp.buffer_id is of.NO_BUFFER:
+      msg.data = event.data
+    else:
+      msg.buffer_id = event.ofp.buffer_id
+    event.connection.send(msg.pack())
+    
+
+
 
   def _handle_FlowRemoved (self, event):
     """ Handles the removal of our special flow entry to drop packets during a PCount session.
@@ -429,13 +458,20 @@ class fault_tolerant_controller (EventMixin):
 
 
 
-def launch ():
+def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1):
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
     discovery.LINK_TIMEOUT = LINK_TIMEOUT
     core.registerNew(discovery.Discovery)
     
-  core.registerNew(fault_tolerant_controller)
+  if num_monitor_flows != -1:
+    #log.debug("before created ft_controller")
+    #controller = fault_tolerant_controller()
+    #controller.algorithm_mode = multicast.Mode.BASELINE
+    pcount_all.set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage)
+    core.registerNew(fault_tolerant_controller)
+  else:
+    core.registerNew(fault_tolerant_controller)
   
   
 

@@ -17,7 +17,7 @@ from pox.lib.addresses import IPAddr,EthAddr
 from pox.lib.packet.ethernet import ethernet
 from pox.lib.packet.ipv4 import ipv4
 from pox.lib.packet.arp import arp
-import utils, appleseed, multicast
+import utils, appleseed, multicast,stats
 
 import pox.openflow.libopenflow_01 as of
 
@@ -26,17 +26,55 @@ from pox.lib.revent import *
 import time, random, os, csv
 
 global_vlan_id=0
+global_current_high_priority=of.OFP_DEFAULT_PRIORITY 
 
 # in seconds
-PCOUNT_WINDOW_SIZE=1  
+IS_PCOUNT_EXP = False
+PCOUNT_WINDOW_SIZE=5  
 PCOUNT_CALL_FREQUENCY=PCOUNT_WINDOW_SIZE*2
-PROPOGATION_DELAY=1 #seconds
+PCOUNT_PROP_DELAY=1 #seconds
+PCOUNT_NUM_MONITOR_FLOWS=-1
+PCOUNT_NUM_UNICAST_FLOWS=-1
+PCOUNT_TRUE_LOSS_PERCENTAGE = -1
+PCOUNT_LOSS_THRESHOLD = -1
 
+PCOUNT_SAMPLE_QUOTA = 3
+pcount_window_detect_time_results = []  #list of lists, where each sublist is of form [num_monitored_flows,window_size,mean_detection_time, confidence_interval_lower, confidence_interval_upper]
 
+pcount_window_sizes = [0.5,1]
+#pcount_window_sizes = [2,0.5,1,1.5,2,2.5,3,3.5,4,4.5,5]
+
+#num_monitor_flows=-1,num_unicast_flows=-1,loss_threshold=-1
+
+def set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage):
+  log.debug("setting up Pcount Expt parameters")
+  global PCOUNT_WINDOW_SIZE
+  if len(pcount_window_sizes) == 0:
+    return True # end the experiment
+  global IS_PCOUNT_EXP
+  IS_PCOUNT_EXP = True
+  PCOUNT_WINDOW_SIZE = pcount_window_sizes.pop(0)
+  global PCOUNT_NUM_MONITOR_FLOWS
+  global PCOUNT_NUM_UNICAST_FLOWS
+  PCOUNT_NUM_MONITOR_FLOWS = int(num_monitor_flows)
+  PCOUNT_NUM_UNICAST_FLOWS = int(num_unicast_flows)
+  
+  global PCOUNT_TRUE_LOSS_PERCENTAGE
+  PCOUNT_TRUE_LOSS_PERCENTAGE = float(true_loss_percentage)
+  
+  global PCOUNT_LOSS_THRESHOLD
+  send_rate = 60 # 60 pkts per second
+  PCOUNT_LOSS_THRESHOLD = int( float(num_unicast_flows) * float(send_rate) * float(PCOUNT_WINDOW_SIZE) * float(true_loss_percentage)/100 )
+  PCOUNT_LOSS_THRESHOLD=2
+  
+  msg = "PCount Exp Parameters: w=%s, true loss=%s, threshold=%s, num_monitored_flows=%s" %(PCOUNT_WINDOW_SIZE,PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD,PCOUNT_NUM_MONITOR_FLOWS)
+  log.info(msg)
+
+  return False
   
 def start_pcount(controller,monitored_links,primary_trees,num_monitor_flows=1000):
   """ Find all primary trees using the monitored links and, for each monitored link (u,d), create PCount sessions for the set of flow entry used to forward packets along (u,d)"""
-  
+ 
   if controller.algorithm_mode == multicast.Mode.MERGER: 
     msg = "Error.  Trying to initiate pcount_all session with MERGER optimization. Currently not supported"
     raise appleseed.AppleseedError(msg)
@@ -54,13 +92,15 @@ def start_pcount(controller,monitored_links,primary_trees,num_monitor_flows=1000
     if len(relevant_trees) == 0:
       msg = "No primary trees found using monitored link %s, therefore no pcount sessions initiated." %(monitored_link)
       log.error(msg)
-
-    results = PCountResults(controller)
-    results.actual_pkt_dropped_gt_threshold_time
+    
+    results = PCountResults(controller,global_vlan_id+1,PCOUNT_WINDOW_SIZE,PCOUNT_LOSS_THRESHOLD)
     results.monitored_link = monitored_link
     results.num_monitored_flows = len(relevant_trees)
-    controller.pcount_link_results[monitored_link] = results
+    controller.pcount_link_results[monitored_link].add(results)  
   
+  controller.turn_pcount_off = False
+  #global global_vlan_id
+  #global_vlan_id = 0
   start_pcount_thread(controller,monitored_link[0], monitored_link[1],relevant_trees)
   #os._exit(0)
 
@@ -155,7 +195,9 @@ class PCountSession (EventMixin):
     #self.depracated_flowTables = {} #for each switch keep track of flow tables (switchId --> flow-table-entry), specifically (dpid --> ofp_flow_mod).
     #self.depracated_arpTable = {}
     
-    self.current_highest_priority_flow_num = of.OFP_DEFAULT_PRIORITY
+    self.current_highest_priority_flow_num = global_current_high_priority
+	#of.OFP_DEFAULT_PRIORITY + global_vlan_id
+    log.debug("Current Highest Priority Flow Initalized to %s and global_vlan_id=%s" %(self.current_highest_priority_flow_num,global_vlan_id))
 
     self.arpTable = {}
     self.flowTables = {}
@@ -174,7 +216,18 @@ class PCountSession (EventMixin):
     window_size -- window is the length (in seconds) of the sampling window
     
     """
+    log.debug("At time = %s, checking at pcount_session if pcount flag is on and controller.turn_pcount_off=%s" %(time.time(),controller.turn_pcount_off))
     if controller.turn_pcount_off: 
+      end_experiment_flag = set_pcount_expt_params(PCOUNT_NUM_MONITOR_FLOWS, PCOUNT_NUM_UNICAST_FLOWS, PCOUNT_TRUE_LOSS_PERCENTAGE)
+
+      if end_experiment_flag:
+        os._exit(0)
+        return False
+
+      global global_current_high_priority
+      global_current_high_priority = self.current_highest_priority_flow_num
+      start_pcount(controller,controller.monitored_links,controller.primary_trees,PCOUNT_NUM_MONITOR_FLOWS)
+      log.debug("at time = %s, returning False at pcount_session()" %(time.time()))
       return False
     
     self.arpTable = controller.arpTable
@@ -227,6 +280,10 @@ class PCountSession (EventMixin):
     # (1): count and tag all packets at d that match the VLAN tag
     for primary_tree in relevant_trees:
       self._start_pcount_downstream(d_switch_id,strip_vlan_switch_id,primary_tree,vlan_id)
+    
+    pcount_results = get_pcount_results_obj(self.controller, (u_switch_id,d_switch_id), PCOUNT_WINDOW_SIZE, len(relevant_trees))
+    #pcount_results = self.controller.pcount_link_results[(u_switch_id,d_switch_id)]
+    pcount_results.record_start_time(vlan_id)
     
     # (2): tag and count all packets at upstream switch, u
     for primary_tree in relevant_trees:
@@ -338,7 +395,7 @@ class PCountSession (EventMixin):
       self._reinstall_basic_flow_entry(u_switch_id, primary_tree.root_ip_address, primary_tree.mcast_address, new_flow_priority)
 
     # (2): wait for time proportional to transit time between u and d to turn counting off at d
-    time.sleep(PROPOGATION_DELAY)
+    time.sleep(PCOUNT_PROP_DELAY)
     
     # (3) query u and d for packet counts
     for primary_tree in relevant_trees:
@@ -355,11 +412,12 @@ class PCountSession (EventMixin):
       utils.send_msg_to_switch(u_switch_msg , u_switch_id)
    
       #delete the original upstream flow
-      old_flow_priority = self.current_highest_priority_flow_num - 2
-      u_switch_msg2 = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
-      u_switch_msg2.match,old_flow_priority = self._find_orig_flow_and_clean_cache(u_switch_id,primary_tree.root_ip_address, primary_tree.mcast_address,primary_tree)
-      u_switch_msg2.priority = old_flow_priority
-      utils.send_msg_to_switch(u_switch_msg2 , u_switch_id)
+      if vlan_id > 1:
+        old_flow_priority = self.current_highest_priority_flow_num - 2
+        u_switch_msg2 = of.ofp_flow_mod(command=of.OFPFC_DELETE_STRICT)
+        u_switch_msg2.match,old_flow_priority = self._find_orig_flow_and_clean_cache(u_switch_id,primary_tree.root_ip_address, primary_tree.mcast_address,primary_tree)
+        u_switch_msg2.priority = old_flow_priority
+        utils.send_msg_to_switch(u_switch_msg2 , u_switch_id)
  
     # delete the downstream VLAN counting flow
     for primary_tree in relevant_trees:
@@ -538,11 +596,18 @@ class PCountSession (EventMixin):
 def handle_u_node_query_result (event,controller):
   """ Process a flow statistics query result from a given switch"""
   u_switch_id = event.connection.dpid
+  log.debug("pcount query result from s%s" %(u_switch_id))  
   
-  curr_results = None
-  for pcount_result in controller.pcount_link_results.values():
-    if pcount_result.monitored_link[0] == u_switch_id:
-      curr_results = pcount_result
+  # pcount_results = get_pcount_results_obj(self.controller, (u_switch_id,d_switch_id), PCOUNT_WINDOW_SIZE, len(relevant_trees))
+  monitored_link = None
+  for link in controller.monitored_links.keys():
+  	if link[0] == u_switch_id:
+  		monitored_link = link 
+  		
+  curr_results = get_pcount_results_obj(controller, monitored_link, PCOUNT_WINDOW_SIZE, PCOUNT_NUM_MONITOR_FLOWS)
+#  for pcount_result in controller.pcount_link_results.values():
+#    if pcount_result.monitored_link[0] == u_switch_id:
+#      curr_results = pcount_result
   
   packet_count = -1
   vlan_id = -1
@@ -551,6 +616,7 @@ def handle_u_node_query_result (event,controller):
     for flow_action in flow_stat.actions:
       if isinstance(flow_action, of.ofp_action_vlan_vid): 
         packet_count = flow_stat.packet_count
+        log.debug("u_node packet count = %s" %(packet_count))
         vlan_id = flow_action.vlan_vid
   
   curr_results.update_u_node_results(packet_count,vlan_id)
@@ -559,13 +625,22 @@ def handle_u_node_query_result (event,controller):
 
 def handle_d_node_aggregate_flow_stats (event,controller):
   d_switch_id = event.connection.dpid
+  log.debug("pcount aggregate query result from s%s" %(d_switch_id))  
   
-  curr_results = None
-  for pcount_result in controller.pcount_link_results.values():
-    if pcount_result.monitored_link[1] == d_switch_id:
-      curr_results = pcount_result
+  monitored_link = None
+  for link in controller.monitored_links.keys():
+		if link[1] == d_switch_id:
+			monitored_link = link
+  
+  curr_results = get_pcount_results_obj(controller, monitored_link, PCOUNT_WINDOW_SIZE, PCOUNT_NUM_MONITOR_FLOWS)
+  
+#  curr_results = None
+#  for pcount_result in controller.pcount_link_results.values():
+#    if pcount_result.monitored_link[1] == d_switch_id:
+#      curr_results = pcount_result
   
   pkt_cnt = event.stats.packet_count
+  log.debug("d_node aggregate query result at s%s = %s" %(d_switch_id,pkt_cnt))  
   curr_results.update_d_node_results(pkt_cnt)
 
 
@@ -573,16 +648,34 @@ def find_vlan(event):
   vlan = -1
   
   return vlan
+ 
+def get_pcount_results_obj(controller,link,window_size,num_monitored_flows):
+	for result in controller.pcount_link_results[link]:
+	#	log.debug("comparing with results object l=%s, w=%s, num_monitored_flows=%s" %(link,result.window_size,result.num_monitored_flows)) 
+	#	log.debug("if %s == %s  and %s == %s" %(result.window_size,window_size, result.num_monitored_flows,num_monitored_flows))
+	#	log.debug(" %s == %s is %s and %s == %s is %s" %(result.window_size,window_size, result.window_size == window_size, result.num_monitored_flows,num_monitored_flows, result.num_monitored_flows == num_monitored_flows))
+		if float(result.window_size) == float(window_size) and int(result.num_monitored_flows) == int(num_monitored_flows):
+			return result
+		
+	msg = "no matching PCountResults object found for l=%s with w=%s and num_monitored_flows=%s." %(link,window_size,num_monitored_flows)
+	raise appleseed.AppleseedError(msg)
+		
 
 
 class PCountResults():
   
-  def __init__(self,controller):
+  def __init__(self,controller,start_vlan_id,window_size=-1,loss_threshold=-1):
     self.d_node_count = {}  # vlan_id --> value
     self.u_node_count = {}  # vlan_id --> value
     
     self.actual_total_pkt_dropped = {}  # vlan_id --> value
     self.detect_total_pkt_dropped = {}  # vlan_id --> value
+    
+    self.loss_threshold=loss_threshold
+    self.window_size=window_size
+    self.window_start_time={}# vlan_id --> value
+    self.detect_time={} # vlan_id --> value
+    self.total_detection_time_results = {} #vlan_id --> value
     
     self.actual_pkt_dropped_gt_threshold_time = {}  # vlan_id --> value
     self.detect_pkt_dropped_gt_threshold_time= {}  # vlan_id --> value
@@ -590,10 +683,13 @@ class PCountResults():
     self.monitored_link = -1
     
     self.curr_num_u_node_results = 0
-    self.curr_vlan_id = 1 
+    self.curr_vlan_id = start_vlan_id 
     self.controller = controller
     
     #self.pkt_dropped_curr_sampling_window = 0
+  
+  def record_start_time(self,vlan_id):
+    self.window_start_time[vlan_id] = time.time()
    
   def update_u_node_results(self,pkt_cnt,vlan_id):
     
@@ -632,24 +728,90 @@ class PCountResults():
     
     detected_drops = self.u_node_count[vlan_id] - self.d_node_count[vlan_id]
     
-    if self.controller.check_install_backup_trees(self.monitored_link,detected_drops):
-      self.controller.turn_pcount_off = True
+    if self.check_threshold(vlan_id,detected_drops):
+      if IS_PCOUNT_EXP:
+        self.detect_total_pkt_dropped[vlan_id] = detected_drops
+        self.log_pcount_detect_time_results()
+        self.log_pcount_results()
+      else:
+        self.controller.turn_pcount_off = True
         self.controller.activate_backup_trees(self.monitored_link)
       
-    self.detect_total_pkt_dropped[vlan_id] = detected_drops
-    self.log_pcount_results()
+        self.detect_total_pkt_dropped[vlan_id] = detected_drops
+        self.log_pcount_results()
     
     self.curr_num_u_node_results = 0
     self.curr_vlan_id +=1   # this means that the result for prev vlan must reach the controller before the next session is started
     
-   # print "COMPLETED VLAN SESSION %s with DETECTED DROPPED PKTS: u_cnt - d_cnt = %s - %s = %s" %(self.curr_vlan_id-1,self.u_node_count[vlan_id],self.d_node_count[vlan_id],detected_drops)
+    self.check_window_sample_quota()
     
+
+  def check_threshold(self,vlan_id,pkt_loss_cnt):
+    """ Checks if the pkt_loss_cnt exceeds a threshold""" 
+    if pkt_loss_cnt > PCOUNT_LOSS_THRESHOLD:
+      self.detect_time[vlan_id] = time.time()
+      self.total_detection_time_results[vlan_id]  = self.detect_time[vlan_id] - self.window_start_time[vlan_id]
+      return True
+    return False
+  
+  def log_pcount_detect_time_results(self):
+    """  record the time detected, and output the total detection time """
+    w = csv.writer(open("ext/results/current/pcount-detections-f%s.csv" %(self.num_monitored_flows), "w"))
+    for session_num in range(1,self.curr_vlan_id+1): 
+      if self.detect_time.has_key(session_num):
+        #detect_time = self.detect_time[session_num] - self.window_start_time[session_num]
+        detect_time = self.total_detection_time_results[session_num]
+        detected_drops = self.detect_total_pkt_dropped[session_num]
+        w.writerow([self.window_size,self.num_monitored_flows,self.loss_threshold,detected_drops,detect_time])
     
   def log_pcount_results(self):
   
     file_base = multicast.measure_pnts_file_str.split(".")[0]
     w = csv.writer(open("ext/results/current/%s-output.csv" %(file_base), "w"))
+    if IS_PCOUNT_EXP:
+      w = csv.writer(open("ext/results/current/pcount-sessions.csv", "w"))
     for session_num in range(1,self.curr_vlan_id+1): 
-      detected_drops = self.detect_total_pkt_dropped[session_num]
-      w.writerow([session_num, self.num_monitored_flows,detected_drops])
-    
+      if self.detect_total_pkt_dropped.has_key(session_num):
+        detected_drops = self.detect_total_pkt_dropped[session_num]
+        u_count = self.u_node_count[session_num]
+        d_count = self.d_node_count[session_num]
+        w.writerow([session_num,self.window_size, self.num_monitored_flows,u_count,d_count,detected_drops])
+
+  def check_window_sample_quota(self):
+		""" (1) check if enough samples taken, If yes: (2) stop pcount session, (3) compute the mean and confidence interval + output to file (4) setup constructs for expts on next window size """
+		if len(self.detect_time) < PCOUNT_SAMPLE_QUOTA:
+			return
+		
+		# stop pcount session
+		self.controller.turn_pcount_off = True
+		
+		# TODO: compute the confidence interval and mean, output to file
+		mean = stats.computeMean(self.total_detection_time_results.values())
+		confidence_interval = stats.computeConfInterval(self.total_detection_time_results.values(),90)
+		
+		# log the results
+		global pcount_window_detect_time_results
+		window_results = [self.num_monitored_flows,self.window_size,mean,confidence_interval[0],confidence_interval[1]]
+		pcount_window_detect_time_results.append(window_results)
+		log_all_window_detect_time_results(self.num_monitored_flows)
+		
+		#setup constructs for expts on next window size
+		#log.debug("At time = %s, sleep for %s seconds before moving to next window size" %(time.time(),PCOUNT_CALL_FREQUENCY * 5))
+		#time.sleep(PCOUNT_CALL_FREQUENCY * 5)
+		#log.debug("At time = %s, sleep is done and turning off pcount flag" %(time.time()))
+		log.debug("At time = %s, logging complete of w=%s results and controller.turn_pcount_off = %s" %(time.time(),self.window_size,self.controller.turn_pcount_off))
+		
+		#self.controller.turn_pcount_off = False
+		#set_pcount_expt_params(PCOUNT_NUM_MONITOR_FLOWS, PCOUNT_NUM_UNICAST_FLOWS, PCOUNT_TRUE_LOSS_PERCENTAGE)
+		#start_pcount(self.controller,self.controller.monitored_links,self.controller.primary_trees,PCOUNT_NUM_MONITOR_FLOWS)
+		
+
+def log_all_window_detect_time_results(num_monitored_flows):
+	w = csv.writer(open("ext/results/current/pcount-f%s.csv" %(num_monitored_flows), "w"))
+	
+	for row in pcount_window_detect_time_results:
+		w.writerow(row)
+		
+	
+	
+		

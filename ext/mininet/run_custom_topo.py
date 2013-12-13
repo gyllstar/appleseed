@@ -15,7 +15,7 @@ from mininet.net import Mininet
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 from argparse import ArgumentParser
-from dpg_topos import H2S2,H3S3,H3S2,H3S4,H9S6,H4S8,H6S9,H6S10
+from dpg_topos import H2S2,H3S3,H3S2,H3S4,H9S6,H4S8,H6S9,H6S10,PCountTopo
 import os
 from itertools import izip
 
@@ -39,13 +39,14 @@ def staticArp( net ):
 #			print "%s adding (%s,%s)" %(h,ip,mac)
 			h.setARP(ip=ip,mac=mac)
 			
-topo_classes = ["H3S2","H2S2","H3S3","H3S4","H9S6","H4S8","H6S9","H6S10"]
+topo_classes = ["H3S2","H2S2","H3S3","H3S4","H9S6","H4S8","H6S9","H6S10","PCountTopo"]
 
 parser = ArgumentParser(description="starts a custom mininet topology and connects with a remote controller") 
 
 parser.add_argument("--loss", dest="loss",type=float,help="link loss rate",default=0)
 parser.add_argument("--ip", dest="ip",help="address of remote controller",default="192.168.1.3")
 parser.add_argument("--topoclass", dest="topoclass",help="name of topology class to instantiate, options include = %s" %(topo_classes),default=topo_classes[0])
+parser.add_argument("--pcount-flows", dest="num_pcount_flows",type=int,help="number of unicast flows to create for PCount simulation. ",default=10)
 
 args = parser.parse_args()
 
@@ -74,6 +75,8 @@ elif args.topoclass == topo_classes[6]:
 	topo = H6S9(loss=args.loss)  
 elif args.topoclass == topo_classes[7]:
 	topo = H6S10(loss=args.loss)  
+elif args.topoclass == topo_classes[8]:
+	topo = PCountTopo(loss=args.loss,num_flows=args.pcount-flows)  
 else: 	
 	print "\nError, found no matching class for name = %s. Valid inputs include: \n\t%s \n Exiting program" %(args.topoclass,topo_classes)
 	os._exit(0)
@@ -96,11 +99,8 @@ print "\n\nswitch list:"
 print net.switches
 
 
-#print "\n\nrunning a pingall command"
-#net.pingAll()
 
 print "\n\nrunning 1-hop pings to populate allow for edge switches to discover their adjacent hosts"
-
 
 
 hosts = net.hosts
@@ -129,17 +129,6 @@ cmd_str = 'ping -c1 -W 1 %s' %(special_ip)
 print "h1 %s" %(cmd_str)
 h1.cmd(cmd_str)
 
-
-# The commented code block below is to run a ping btw all nodes.  
-#
-#for h1 in hosts:
-#	for h2 in hosts:
-#		if h1 != h2:
-#			cmd_str = 'ping -c1 -W 1 %s ' %(h2.IP())
-#			#cmd_str = 'ping -c1 -m 1 %s' %(h2.IP())
-#			print "\t %s" %(cmd_str)
-#			h1.cmd(cmd_str)
-#			#h1.cmdPrint(cmd_str)
 
 
 #print "running command `sudo python ~/sd.py' "
