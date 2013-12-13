@@ -69,15 +69,17 @@ parser.add_argument("--ip", dest="ip",help="address of remote controller",defaul
 parser.add_argument("--topoclass", dest="topoclass",help="name of topology class to instantiate, options include = %s" %(topo_classes),default=topo_classes[0])
 parser.add_argument("--num-unicast-flows", dest="num_unicast_flows",type=int,help="number of unicast flows to create for PCount simulation. ",default=10)
 parser.add_argument("--num-monitor-flows", dest="num_monitor_flows",type=int,help="number of unicast flows to monitor create for PCount simulation. ",default=10)
+parser.add_argument("--log", dest="log",type=bool,help="turn logging on at controller. ",default=False)
 
 args = parser.parse_args()
 
-print "\n---------------------------------------------------- "
-print "first a quick cleanup: running `mn -c' \n"
-os.system("mn -c")
-print "---------------------------------------------------- \n\n"
+if args.log:
+	print "\n---------------------------------------------------- "
+	print "first a quick cleanup: running `mn -c' \n"
+	os.system("mn -c")
+	print "---------------------------------------------------- \n\n"
 
-print "parsed command line arguments: %s" %(args)
+	print "parsed command line arguments: %s" %(args)
 
 
 topo=None
@@ -94,11 +96,14 @@ else:
 #write_pcount_expt_params(num_monitor_flows,num_unicast_flows)
 
 # (2) start the appleseed controller
-print "\n starting appleseed controller as Remote Controller"
+if args.log: print "\n starting appleseed controller as Remote Controller"
 sys.path.append('/home/mininet/appleseed')
-#start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', 'openflow.discovery', 'log.level --packet=INFO'] 
-start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', '--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows),
-                   '--true_loss_percentage=%s ' %(args.loss), 'openflow.discovery','log', '--file=ext/results/pcount.log,w'] 
+
+start_assed_cmd = None
+if args.log:
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', '--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows), '--true_loss_percentage=%s ' %(args.loss), 'openflow.discovery','log', '--file=ext/results/pcount.log,w'] 
+else:
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed','--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows),'--true_loss_percentage=%s ' %(args.loss), 'openflow.discovery'] 
 
 os.chdir('/home/mininet/appleseed')
 pid = Popen(start_aseed_cmd,shell=False).pid
@@ -108,9 +113,9 @@ controller_pid = pid + 1
 c_addr = "127.0.0.1"
 c = RemoteController('c',ip=c_addr)
 
-print "trying to connect to remote controller at %s ..."%(c_addr)
+if args.log: print "trying to connect to remote controller at %s ..."%(c_addr)
 net = Mininet(topo=topo,link=TCLink,controller=lambda name: c,listenPort=6634)
-print "connected to remote controller at %s"%(c_addr)
+if args.log: print "connected to remote controller at %s"%(c_addr)
 
 
 
@@ -121,13 +126,13 @@ net.start()
 
 
 
-wait = 4
-print "\n sleeping for %s seconds before sending any Mininet messages so as to allow all links to be discovered by the Appleseed controller. " %(wait)
+wait = 5
+if args.log: print "\n sleeping for %s seconds before sending any Mininet messages so as to allow all links to be discovered by the Appleseed controller. " %(wait)
 time.sleep(wait)
 
 
 
-print "\n\nrunning 1-hop pings to populate allow for edge switches to discover their adjacent hosts"
+if args.log: print "\n\nrunning 1-hop pings to populate allow for edge switches to discover their adjacent hosts"
 hosts = net.hosts
 
 # (2) 1-hop pings: DONE
@@ -140,10 +145,10 @@ if len(hosts)%2==1:
 
 for h1,h2 in pairwise(hosts):
 	cmd_str1 = 'ping -c1 -W 1 %s ' %(h2.IP())
-	print "%s %s" %(h1,cmd_str1)
+	if args.log: print "%s %s" %(h1,cmd_str1)
 	h1.cmd(cmd_str1)
 	cmd_str2 = 'ping -c1 -W 1 %s ' %(h1.IP())
-	print "%s %s" %(h2,cmd_str2)
+	if args.log: print "%s %s" %(h2,cmd_str2)
 	h2.cmd(cmd_str2)
 
 	
@@ -154,7 +159,7 @@ staticArp(net)
 h1 = hosts[0]
 special_ip = '10.99.99.99'
 cmd_str = 'ping -c1 -W 1 %s' %(special_ip)
-print "h1 %s" %(cmd_str)
+if args.log: print "h1 %s" %(cmd_str)
 h1.cmd(cmd_str)
 
 
@@ -176,15 +181,16 @@ for host_num in range(1,num_unicast_flows+1):
 	dst_id = host_num + num_unicast_flows
 	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(host_num,dst_id,rate,host_num)
 	#cmd = 'sudo ping -c50 10.0.0.%s > ~/cbr/h%s_ping.out &' %(dst_id,host_num)
-	print cmd
-	host.cmd(cmd)
+	if args.log: print cmd
+	#host.cmd(cmd)
 
-CLI(net)
+#CLI(net)
 
 #wait = 60
 #print "\n sleeping for %s seconds to cbr flows to start " %(wait)
 #time.sleep(wait)
 
-
+#raw_input("Press Enter to Exit")
+raw_input()
 
 net.stop()

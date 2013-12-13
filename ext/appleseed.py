@@ -318,7 +318,6 @@ class fault_tolerant_controller (EventMixin):
             
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
-	    print msg
             if pcount_all.IS_PCOUNT_EXP:
               log.debug( "\n INSTALLING UNICAST FLOWS")
               multicast.install_pcount_unicast_flows(self)

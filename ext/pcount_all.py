@@ -41,7 +41,7 @@ PCOUNT_LOSS_THRESHOLD = -1
 PCOUNT_SAMPLE_QUOTA = 3
 pcount_window_detect_time_results = []  #list of lists, where each sublist is of form [num_monitored_flows,window_size,mean_detection_time, confidence_interval_lower, confidence_interval_upper]
 
-pcount_window_sizes = [0.5,1]
+pcount_window_sizes = [0.5,1,1.5]
 #pcount_window_sizes = [2,0.5,1,1.5,2,2.5,3,3.5,4,4.5,5]
 
 #num_monitor_flows=-1,num_unicast_flows=-1,loss_threshold=-1
@@ -65,14 +65,14 @@ def set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percent
   global PCOUNT_LOSS_THRESHOLD
   send_rate = 60 # 60 pkts per second
   PCOUNT_LOSS_THRESHOLD = int( float(num_unicast_flows) * float(send_rate) * float(PCOUNT_WINDOW_SIZE) * float(true_loss_percentage)/100 )
-  PCOUNT_LOSS_THRESHOLD=2
+  PCOUNT_LOSS_THRESHOLD=-1
   
   msg = "PCount Exp Parameters: w=%s, true loss=%s, threshold=%s, num_monitored_flows=%s" %(PCOUNT_WINDOW_SIZE,PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD,PCOUNT_NUM_MONITOR_FLOWS)
   log.info(msg)
 
   return False
   
-def start_pcount(controller,monitored_links,primary_trees,num_monitor_flows=1000):
+def start_pcount(controller,monitored_links,primary_trees,num_monitor_flows=PCOUNT_NUM_MONITOR_FLOWS):
   """ Find all primary trees using the monitored links and, for each monitored link (u,d), create PCount sessions for the set of flow entry used to forward packets along (u,d)"""
  
   if controller.algorithm_mode == multicast.Mode.MERGER: 
@@ -119,68 +119,11 @@ def start_pcount_thread(controller,u_switch_id,d_switch_id,relevant_trees):
   # likely can make this more dynamic by finding the most downstream nodes along the measurement path to determine the strip_vlan_switch_ids
   strip_vlan_switch_ids = d_switch_id
   
+  msg = "\nAPPLESEED CONTROLLER MSG: Starting PCount Experiment Run (%s runs left) with Parameters:\n\t\t w=%s,num_monitored_flows=%s, true loss=%s, threshold=%s \n" %(len(pcount_window_sizes),PCOUNT_WINDOW_SIZE,len(relevant_trees),PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD)
+  print msg #want to print so we know our progress when running our experiments
   
   #pcounter.pcount_session(controller,u_switch_id,d_switch_id,relevant_trees,strip_vlan_switch_ids,PCOUNT_WINDOW_SIZE)
   Timer(PCOUNT_CALL_FREQUENCY,pcounter.pcount_session, args = [controller,u_switch_id,d_switch_id,relevant_trees,strip_vlan_switch_ids,PCOUNT_WINDOW_SIZE],recurring=True,selfStoppable=True)
-
-
-
-# TODO: refactor this mess by changing the structure of flow_measure_points to (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id) b/c no longer will need to search
-#       the entire dict for a match
-def is_counting_switch(switch_id,nw_src,nw_dst,controller):
-  """ Checks if this switch is a downstream counting node for the (nw_src,nw_dst) flow
-   
-   TODO: refactor this mess by changing the structure of flow_measure_points to (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id) b/c no longer will need to search
-        the entire dict for a match 
-  """
-  # could be the key
-  if controller.flow_measure_points.has_key(switch_id):
-    for measure_pnt in controller.flow_measure_points[switch_id]:
-      last_indx = len(measure_pnt) -1
-      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-        return True
-   
-  # could also be one of the first few values in the value list
-  for measure_pnts in controller.flow_measure_points.values():
-    for measure_pnt in measure_pnts:
-      last_indx = len(measure_pnt) -1
-      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-        if switch_id in measure_pnt[0:last_indx-2]:  # the list "subset" or slice is not inclusive on the upper index
-          return True
-  
-  return False
-   
-
-
-# tagging takes place at the upstream node
-def is_tagging_switch(switch_id,nw_src,nw_dst,controller):
-  """ is this an upstream tagging switch for flow (nw_src,nw_dst) """
-  
-  for measure_pnts in controller.flow_measure_points.values():
-    for measure_pnt in measure_pnts:
-      last_indx = len(measure_pnt) -1
-      if measure_pnt[last_indx-2] == switch_id and measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-        return True
-  
-  
-  return False
-
-
-def total_tag_and_cnt_switches(nw_src, nw_dst,controller):
-  """ returns the total number of measurement nodes (taggers and counters) for flow (nw_src,nw_dst)"""
-  for measure_pnts in controller.flow_measure_points.values():
-    for measure_pnt in measure_pnts:
-      last_indx = len(measure_pnt) -1
-      if measure_pnt[last_indx-1] == nw_src and measure_pnt[last_indx] == nw_dst:
-        return len(measure_pnt) -2 + 1  # minus two because don't want to count the nw_src, nw_dst, and plus one because one counting switch is not in teh measure_pnt list (it is the hash key)
-  
-  return -1
-   
- 
-    
-      
-
-
 
 
 
@@ -196,7 +139,7 @@ class PCountSession (EventMixin):
     #self.depracated_arpTable = {}
     
     self.current_highest_priority_flow_num = global_current_high_priority
-	#of.OFP_DEFAULT_PRIORITY + global_vlan_id
+		  																				#of.OFP_DEFAULT_PRIORITY + global_vlan_id
     log.debug("Current Highest Priority Flow Initalized to %s and global_vlan_id=%s" %(self.current_highest_priority_flow_num,global_vlan_id))
 
     self.arpTable = {}
@@ -221,6 +164,7 @@ class PCountSession (EventMixin):
       end_experiment_flag = set_pcount_expt_params(PCOUNT_NUM_MONITOR_FLOWS, PCOUNT_NUM_UNICAST_FLOWS, PCOUNT_TRUE_LOSS_PERCENTAGE)
 
       if end_experiment_flag:
+        print "Appleseed Controller program terminated.  Press Enter to Exit Mininet script."
         os._exit(0)
         return False
 
