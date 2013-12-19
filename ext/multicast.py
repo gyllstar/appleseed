@@ -193,13 +193,18 @@ def find_mcast_measure_points(nw_src,mcast_ip_addr1,controller):
     
   return -1,-1
 
-def generate_multicast_groups(controller):
+def generate_multicast_groups(controller,backup_tree_expt=False):
   """ Temporary solution is just use the multicast groups read from a text file (see utils.read_mtree_file).  Would like to generate multicast groups w/ a random process.
       
       Currently this a no-op as the multicast groups are already read from a text file.
   """
-  
+  if backup_tree_expt:
+    # clear the mcast groups, read in the mcast groups from file
+    controller.mcast_groups.clear()
+    
+    
   # considering all end_hosts, generate some random multicast groups
+  
   
   # add each multicast group to controller.mcast_groups
   
@@ -1290,8 +1295,6 @@ def create_node_edge_objects(controller):
     
 def install_pcount_unicast_flows(controller):
   """ Used by PCount Experiments"""
-  #log.debug("sleeping for 2 seconds before installing unicast flows")
-  #time.sleep(2)
   num_hosts_half = int(pcount_all.PCOUNT_NUM_UNICAST_FLOWS)
   u_id = int(num_hosts_half * 2) +1
   d_id = u_id+1
@@ -1313,14 +1316,15 @@ def install_pcount_unicast_flows(controller):
     log.debug("installing primary tree for unicast flow (%s,%s)" %(src_id,dst_id))
     tree.install()
 
-def install_all_trees(controller):
+
+def install_all_trees(controller,backup_tree_expt=False):
   """  (1) Compute and install the primary trees. 
        (2) Triggers a pcount session after a 5 second delay (using a timer)
        (3) Precompute backup trees
   
       NICK: Here is where the primary trees are computed and installed.  Also, we precompute (and potentially pre-install) backup trees here.
    """
-  generate_multicast_groups(controller)  # NICK: currently the mutlicast groups are just read from a file 'mtree_file_str'
+  generate_multicast_groups(controller,backup_tree_expt)  # NICK: currently the mutlicast groups are just read from a file 'mtree_file_str'
   
   compute_primary_trees(controller)   # NICK: look at this function 
   
@@ -1342,7 +1346,7 @@ def install_all_trees(controller):
   
   compute_backup_trees(controller)
   
-
+  
 def compute_backup_trees(controller):
   """ Short-term: hard-coded backup tree + assume only one backup tree per primary tree"""
   num_switches = len(core.openflow_discovery._dps)

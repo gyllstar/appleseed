@@ -56,9 +56,9 @@ import time
 
 
 
-
+BACKUP_TREE_EXPT_FLAG = False
 INSTALL_PRIMARY_TREES_DELAY = 20  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
-INSTALL_PRIMARY_TREE_TRIGGER_IP = IPAddr("10.99.99.99")
+INSTALL_PRIMARY_TREE_TRIGGER_IP = IPAddr("10.244.244.244")
 LINK_TIMEOUT = 1000 # time the discovery module waits before considering a link removed
 
 class Entry (object):
@@ -318,10 +318,13 @@ class fault_tolerant_controller (EventMixin):
             
             msg = "received special packet destined to %s so starting to install primary trees and any backup trees (if using Proactive recovery approach)" %(a.protodst)
             log.info(msg)
+            
             if pcount_all.IS_PCOUNT_EXP:
               log.debug( "\n INSTALLING UNICAST FLOWS")
               multicast.install_pcount_unicast_flows(self)
               pcount_all.start_pcount(self,self.monitored_links,self.primary_trees,pcount_all.PCOUNT_NUM_MONITOR_FLOWS)
+            elif BACKUP_TREE_EXPT_FLAG:
+              multicast.install_all_trees(self,True) 
             else:
               multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
               pcount_all.start_pcount(self,self.monitored_links,self.primary_trees)
@@ -457,7 +460,7 @@ class fault_tolerant_controller (EventMixin):
 
 
 
-def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1):
+def launch (is_backup_tree_expt = False,num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1,dtime=False):
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
     discovery.LINK_TIMEOUT = LINK_TIMEOUT
@@ -467,9 +470,14 @@ def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1):
     #log.debug("before created ft_controller")
     #controller = fault_tolerant_controller()
     #controller.algorithm_mode = multicast.Mode.BASELINE
+    pcount_all.PCOUNT_DTIME_EXPT = bool(dtime)
+    if bool(dtime):
+      num_monitor_flows = 1
     pcount_all.set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage)
     core.registerNew(fault_tolerant_controller)
   else:
+    if bool(is_backup_tree_expt):
+      BACKUP_TREE_EXPT_FLAG = True
     core.registerNew(fault_tolerant_controller)
   
   

@@ -92,3 +92,4 @@ def computeConfIntervalVal(array,percent):
     temp = temp * zVal
     
     return temp
+ 

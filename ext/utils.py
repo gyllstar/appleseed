@@ -71,6 +71,30 @@ def find_flow_outports(flowTables,switch_id,nw_src,nw_dst):
   #return outports
 
 
+def read_mcast_groups_file(controller):
+  
+  mcast_group_file = "ext/topos/ext/topos/mcast-groups.csv" 
+    
+  #file structure:. root_id,terminal_host_id1,terminal_host_id2, ...
+  for row in csv.reader(open(mcast_group_file),delimiter=','):
+    val_list = []
+    
+    # check if it's a comment line
+    if "#" in row[0]:
+      continue
+    
+    root_id = row[0]
+    
+    val_list.insert(0, IPAddr(line_list[1])) #src ip
+    
+    i = 2
+    while i < len(line_list): #2<4
+      val_list.insert(i-1, IPAddr(line_list[i]))
+      i+=1
+    
+    key = IPAddr(line_list[0])
+    controller.mcast_groups[key] = val_list
+
 def read_mtree_file(controller):
   """
   reads in a file specifying the nodes in a multicast tree (or trees)

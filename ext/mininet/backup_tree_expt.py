@@ -15,7 +15,8 @@ from mininet.net import Mininet
 from mininet.log import setLogLevel
 from mininet.cli import CLI
 from argparse import ArgumentParser
-from dpg_topos import PCountTopo
+import graph_generator
+from graph_generator import IeeeMininetTopo
 import os
 from itertools import izip
 import sys
@@ -25,11 +26,11 @@ import subprocess
 from subprocess import Popen
 import csv
 
+ieee_graphs_folder = "ieee-buses/"
+ieee_base_file_name = "ieee"
+ieee_file_type = "txt"
+controller_pid=-1
 
-
-def write_pcount_expt_params(num_monitored_flows,num_hosts):
-  w = csv.writer(open("~/appleseed/expt/pcount_parms.txt", "w"))
-  w.writerow([num_monitored_flows,num_hosts])
 
 def pairwise(iterable):
 	a = iter(iterable)
@@ -47,9 +48,16 @@ def staticArp( net ):
 		for dst in net.hosts:
 			switch.setARP(ip=dst.IP(), mac = dst.MAC())	
 
+def kill_controller():
+	kill_cmd = "sudo kill -9 %s" %(controller_pid) 
+	os.system(kill_cmd)
+	sys.exit(0)	
 
 
-controller_pid=-1
+def compute_mcast_addr(root_id):
+	""" Takes node_id and makes IP address - 10.node_id.node_id.node_id.  Example, node_id = 13 yields 10.13.13.13 """
+	mcast_addr = "10.%s.%s.%s" %(root_id,root_id,root_id)
+	return mcast_addr
 
 def signal_handler(signal,frame):
 	print "Ctrl+C pressed.  Killing controller process, then exiting."
@@ -60,16 +68,10 @@ def signal_handler(signal,frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 
-topo_classes = ["PCountTopo"]
+parser = ArgumentParser(description="generates IEEE topology, creates a corresponding mininet network, generates multicast groups, and installs backup trees.") 
 
-parser = ArgumentParser(description="starts a custom mininet topology and connects with a remote controller") 
-
-parser.add_argument("--dtime", dest="dtime",type=bool,help="run simulation fixing the window size and varying number of monitored flows",default=False)
-parser.add_argument("--loss", dest="loss",type=float,help="link loss rate as integer NOT as a fraction",default=5)
-parser.add_argument("--ip", dest="ip",help="address of remote controller",default="192.168.1.3")
-parser.add_argument("--topoclass", dest="topoclass",help="name of topology class to instantiate, options include = %s" %(topo_classes),default=topo_classes[0])
-parser.add_argument("--num-unicast-flows", dest="num_unicast_flows",type=int,help="number of unicast flows to create for PCount simulation. ",default=10)
-parser.add_argument("--num-monitor-flows", dest="num_monitor_flows",type=int,help="number of unicast flows to monitor create for PCount simulation. ",default=10)
+parser.add_argument("--topo", dest="topo_num",type=int,help="IEEE topology number (i.e, 14,30,57,118) link",default=14)
+parser.add_argument("--num-groups", dest="num_groups",type=int,help="number of multicast groups",default=1)
 parser.add_argument("--log", dest="log",type=bool,help="turn logging on at controller. ",default=False)
 
 args = parser.parse_args()
@@ -83,19 +85,14 @@ if args.log:
 	print "parsed command line arguments: %s" %(args)
 
 
-topo=None
-num_unicast_flows = args.num_unicast_flows
-num_monitor_flows = args.num_monitor_flows
-if args.topoclass == topo_classes[0]:
-	topo = PCountTopo(loss=args.loss,num_flows=args.num_unicast_flows)  
-else: 	
-	print "\nError, found no matching class for name = %s. Valid inputs include: \n\t%s \n Exiting program" %(args.topoclass,topo_classes)
-	os._exit(0)
+
+ieee_file_str = "%s%s%s.%s" %(ieee_graphs_folder,ieee_base_file_name,args.topo_num,ieee_file_type)
+ieee_mn_graph,mcast_groups = graph_generator.gen_graph_and_mcast_groups(ieee_file_str,num_groups=args.num_groups)
+print mcast_groups
 
 
+setLogLevel('debug')
 
-# (1) write experiment parameters to file for appleseed controller to read
-#write_pcount_expt_params(num_monitor_flows,num_unicast_flows)
 
 # (2) start the appleseed controller
 if args.log: print "\n starting appleseed controller as Remote Controller"
@@ -103,9 +100,10 @@ sys.path.append('/home/mininet/appleseed')
 
 start_assed_cmd = None
 if args.log:
-	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', '--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows), '--true_loss_percentage=%s ' %(args.loss),'--dtime=%s' %(args.dtime),'openflow.discovery','log', '--file=ext/results/pcount.log,w'] 
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed','--is_backup_tree_expt=True','openflow.discovery','log', '--file=ext/results/backup_tree_expt.log,w'] 
 else:
-	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed','--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows),'--true_loss_percentage=%s ' %(args.loss), '--dtime=%s' %(args.dtime),'openflow.discovery'] 
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed', '--is_backup_tree_expt=True', 'openflow.discovery'] 
+
 
 os.chdir('/home/mininet/appleseed')
 pid = Popen(start_aseed_cmd,shell=False).pid
@@ -116,15 +114,8 @@ c_addr = "127.0.0.1"
 c = RemoteController('c',ip=c_addr)
 
 if args.log: print "trying to connect to remote controller at %s ..."%(c_addr)
-net = Mininet(topo=topo,link=TCLink,controller=lambda name: c,listenPort=6634)
+net = Mininet(topo=ieee_mn_graph,link=TCLink,controller=lambda name: c,listenPort=6634)
 if args.log: print "connected to remote controller at %s"%(c_addr)
-
-
-
-#net.build()
-net.start()
-#CLI( net )
-#os._exit(0)
 
 
 
@@ -164,27 +155,19 @@ cmd_str = 'ping -c1 -W 1 %s' %(special_ip)
 if args.log: print "h1 %s" %(cmd_str)
 h1.cmd(cmd_str)
 
+wait = 5
+print "\n sleeping for %s seconds before starting cbr flows " %(wait)
+time.sleep(wait)
 
-
-#CLI(net)
-#net.stop()
-#os._exit(0)
-
-
-#wait = 10
-#print "\n sleeping for %s seconds to debug the controller" %(wait)
-#time.sleep(wait)
-
-# (4) start the 'm' flows: TODO
-host_num = 1
+# (4) start the cbr flows at the mcast root nodes
 rate = 60	# 60 msgs per second
-for host_num in range(1,num_unicast_flows+1):
-	host = hosts[host_num-1]
-	dst_id = host_num + num_unicast_flows
-	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(host_num,dst_id,rate,host_num)
-	#cmd = 'sudo ping -c50 10.0.0.%s > ~/cbr/h%s_ping.out &' %(dst_id,host_num)
+for group in mcast_groups:
+	root_id = group[0]
+	root_host = hosts[root_id -1]
+	mcast_addr = compute_mcast_addr(root_id)
+	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(root_id,mcast_addr,rate,root_id)
 	if args.log: print cmd
-	host.cmd(cmd)
+	root_host.cmd(cmd)
 
 #CLI(net)
 
@@ -193,6 +176,7 @@ for host_num in range(1,num_unicast_flows+1):
 #time.sleep(wait)
 
 #raw_input("Press Enter to Exit")
+
 raw_input()
 
 net.stop()
