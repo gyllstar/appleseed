@@ -146,7 +146,7 @@ def plot_detection_time(data_file,sd_flag=False):
 		type_str = "ci"
 	plt.xlabel("Windows Size (seconds)")
 	plt.ylabel("Processing Time (seconds)")
-	plt.xlim(0,5)
+	plt.xlim(0,7.5)
 	plt.legend(loc='upper left')
 	#plt.show()
 	
@@ -167,9 +167,10 @@ def plot_all_detect_time(sd_flag=False):
 		l_str = data_file.split("-")[2]
 		plot_detection_time(data_file, sd_flag)
 
-rate_folder = 'rate/'
-figs_folder = 'rate/figs/'
-data_files = ['pcount-results-l10-u5.csv','pcount-results-l5-u5.csv','pcount-results-l1-u5.csv']
+rate_folder = 'loss/'
+figs_folder = 'loss/figs/'
+#data_files = ['pcount-loss-l10-u5.csv','pcount-loss-l5-u5.csv','pcount-loss-l1-u5.csv']
+data_files = ['pcount-loss-l5-u10.csv']
 plot_loss_flag = True
 plot_detect_time_flag = True
 if plot_loss_flag:

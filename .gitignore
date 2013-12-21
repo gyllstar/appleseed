@@ -21,3 +21,7 @@ ext/bak/
 ext/topos/topology_generator-depracted.py
 *-output.csv
 
+
+/ext/results/alt_plot.py
+
+*.log

@@ -28,7 +28,8 @@ import time, random, os, csv
 global_vlan_id = 0
 global_current_high_priority = of.OFP_DEFAULT_PRIORITY 
 
-# in seconds
+# variables for loss rate
+PCOUNT_SAMPLE_QUOTA = 50
 IS_PCOUNT_EXP = False
 PCOUNT_WINDOW_SIZE = 5  
 PCOUNT_CALL_FREQUENCY = PCOUNT_WINDOW_SIZE * 2
@@ -37,14 +38,19 @@ PCOUNT_NUM_MONITOR_FLOWS = -1
 PCOUNT_NUM_UNICAST_FLOWS = -1
 PCOUNT_TRUE_LOSS_PERCENTAGE = -1
 PCOUNT_LOSS_THRESHOLD = -1
+pcount_window_sizes = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5,5.5,6,6.5,7]
 
-PCOUNT_SAMPLE_QUOTA = 50
 pcount_window_detect_time_results = []  #list of lists, where each sublist is of form [num_monitored_flows,window_size,mean_detection_time, confidence_interval_lower, confidence_interval_upper]
+
+# variables for detection time
 PCOUNT_DTIME_EXPT = False
-PCOUNT_MAX_NUM_MONITORS = 300
-#pcount_window_sizes = [1,2]
-pcount_window_sizes = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]
+PCOUNT_MAX_NUM_MONITORS = 60
+PCOUNT_MAX_NUM_JUNKFLOWS = 1000
+PCOUNT_JUNKFLOWS_INCREMENT = int(PCOUNT_MAX_NUM_JUNKFLOWS / 4)
+PCOUNT_CURR_NUM_JUNKFLOWS = 0
 pcount_dtime_window = 2
+curr_pcount_session=None #PCountSession object
+
 #pcount_window_sizes = [0.2,0.4,0.6,0.8,1,1.2,1.4,1.6,1.8,2,3,4,5]
 
 #num_monitor_flows=-1,num_unicast_flows=-1,loss_threshold=-1
@@ -53,7 +59,7 @@ def set_pcount_expt_params(num_monitor_flows, num_unicast_flows, true_loss_perce
   log.debug("setting up Pcount Expt parameters")
   global PCOUNT_WINDOW_SIZE
   if len(pcount_window_sizes) == 0 and move_to_next_sim:
-    return True # end the experiment
+    return True,num_monitor_flows # end the experiment
    
   global IS_PCOUNT_EXP
   IS_PCOUNT_EXP = True
@@ -76,9 +82,17 @@ def set_pcount_expt_params(num_monitor_flows, num_unicast_flows, true_loss_perce
   
   msg = ""
   if PCOUNT_DTIME_EXPT:
+    if PCOUNT_CURR_NUM_JUNKFLOWS > PCOUNT_MAX_NUM_JUNKFLOWS:
+      return True,num_monitor_flows # exit the experiment
+
     if num_monitor_flows > PCOUNT_MAX_NUM_MONITORS:
-      return True
-    global PCOUNT_NUM_MONITOR_FLOWS 
+      # advance to next num JUNK flows and reset90 num_monitor_flows
+   
+      global PCOUNT_CURR_NUM_JUNKFLOWS
+      PCOUNT_CURR_NUM_JUNKFLOWS = PCOUNT_CURR_NUM_JUNKFLOWS + PCOUNT_JUNKFLOWS_INCREMENT
+      num_monitor_flows = 1 
+
+    global PCOUNT_NUM_MONITOR_FLOWS
     PCOUNT_NUM_MONITOR_FLOWS = num_monitor_flows
     PCOUNT_WINDOW_SIZE = pcount_dtime_window
     msg = "PCount Exp Parameters: w=%s, true loss=%s, threshold=%s, num_monitored_flows=%s" % (pcount_dtime_window, PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD, PCOUNT_NUM_MONITOR_FLOWS)
@@ -86,7 +100,10 @@ def set_pcount_expt_params(num_monitor_flows, num_unicast_flows, true_loss_perce
     msg = "PCount Exp Parameters: w=%s, true loss=%s, threshold=%s, num_monitored_flows=%s" % (PCOUNT_WINDOW_SIZE, PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD, PCOUNT_NUM_MONITOR_FLOWS)
   log.info(msg)
 
-  return False
+  global PCOUNT_CALL_FREQUENCY
+  PCOUNT_CALL_FREQUENCY = PCOUNT_WINDOW_SIZE * 2
+  os._exit(0)
+  return False,PCOUNT_NUM_MONITOR_FLOWS
   
 def get_next_dummy_src_ipaddr(id):
   ip_str = ""
@@ -117,13 +134,13 @@ def gen_dummy_primary_trees(controller, num_dummy_trees, relevant_trees):
     tree.install()
   
 def sample_random_primary_tree_set(primary_trees, monitored_link, sample_size):
-	
-	all_relevant_trees = []
-	for tree in primary_trees:
-		if tree.uses_link(monitored_link):
-			all_relevant_trees.append(tree)
-	sample_list = random.sample(all_relevant_trees, sample_size)
-	return set(sample_list)
+  
+  all_relevant_trees = []
+  for tree in primary_trees:
+    if tree.uses_link(monitored_link):
+      all_relevant_trees.append(tree)
+  sample_list = random.sample(all_relevant_trees, sample_size)
+  return set(sample_list)
 
 def start_pcount(controller, monitored_links, primary_trees, num_monitor_flows=PCOUNT_NUM_MONITOR_FLOWS):
   """ Find all primary trees using the monitored links and, for each monitored link (u,d), create PCount sessions for the set of flow entry used to forward packets along (u,d)"""
@@ -145,21 +162,37 @@ def start_pcount(controller, monitored_links, primary_trees, num_monitor_flows=P
     if PCOUNT_DTIME_EXPT and len(relevant_trees) < PCOUNT_NUM_MONITOR_FLOWS:
       diff = PCOUNT_NUM_MONITOR_FLOWS - len(relevant_trees) 
       gen_dummy_primary_trees(controller, diff, relevant_trees)
+      log.debug("generating dummy primary trees for fake monitoring of flows.")
     
     if len(relevant_trees) == 0:
       msg = "No primary trees found using monitored link %s, therefore no pcount sessions initiated." % (monitored_link)
       log.error(msg)
     
-    results = PCountResults(controller, global_vlan_id + 1, PCOUNT_WINDOW_SIZE, PCOUNT_LOSS_THRESHOLD)
+    results = PCountResults(controller, global_vlan_id + 1, PCOUNT_WINDOW_SIZE, PCOUNT_LOSS_THRESHOLD,PCOUNT_CURR_NUM_JUNKFLOWS)
     results.monitored_link = monitored_link
     results.num_monitored_flows = len(relevant_trees)
     controller.pcount_link_results[monitored_link].add(results)  
   
-  controller.turn_pcount_off = False
+  #controller.turn_pcount_off = False
   start_pcount_thread(controller, monitored_link[0], monitored_link[1], relevant_trees)
 
     # (3) create synchronous Pcount sessions for each flow entry from (2)
 
+
+def install_junk_flow_entries(controller, u_switch_id, d_switch_id):
+  """ Install junk flow entries at u_id and d_id using PCOUNT_CURR_NUM_JUNKFLOWS value """
+  if PCOUNT_CURR_NUM_JUNKFLOWS == 0: return
+  num_installed_junkflows = PCOUNT_CURR_NUM_JUNKFLOWS - PCOUNT_JUNKFLOWS_INCREMENT
+  for junk_num in range(num_installed_junkflows, PCOUNT_CURR_NUM_JUNKFLOWS):
+  	junk_dst_ipaddr = IPAddr("10.77.77.77")
+  	junk_msg = of.ofp_flow_mod(command=of.OFPFC_ADD)
+  	junk_msg.match = of.ofp_match(dl_type=ethernet.IP_TYPE, nw_dst=junk_dst_ipaddr)
+  	junk_msg.priority = junk_num
+  	utils.send_msg_to_switch(junk_msg, u_switch_id)
+  	utils.send_msg_to_switch(junk_msg, d_switch_id)
+	   #controller.cache_flow_table_entry(u_switch_id, junk_msg)  #probably don't need this
+	   #controller.cache_flow_table_entry(d_switch_id, junk_msg)
+     
 def start_pcount_thread(controller, u_switch_id, d_switch_id, relevant_trees):
   """ Sets a timer to start a PCount session
   
@@ -168,67 +201,82 @@ def start_pcount_thread(controller, u_switch_id, d_switch_id, relevant_trees):
   d_switch_id -- downstream switch id
   relevant_trees -- trees using (u,d)
   """
-  pcounter = PCountSession()
+  
   
   # likely can make this more dynamic by finding the most downstream nodes along the measurement path to determine the strip_vlan_switch_ids
   strip_vlan_switch_ids = d_switch_id
+  pcounter = PCountSession(u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_ids, PCOUNT_WINDOW_SIZE)
   
-  msg = "\nAPPLESEED CONTROLLER MSG: Starting PCount Experiment Run (%s window sizes left) with Parameters:\n\t\t w=%s,num_monitored_flows=%s, true loss=%s, threshold=%s \n" % (len(pcount_window_sizes), PCOUNT_WINDOW_SIZE, len(relevant_trees), PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD)
+  global curr_pcount_session
+  curr_pcount_session = pcounter
+  
+  msg = "\nAPPLESEED CONTROLLER MSG: Starting PCount Experiment Run where PCOUNT_DTIME_EXPT=%s, (%s window sizes left) with Parameters:\n\t\t w=%s,num_monitored_flows=%s, true loss=%s, threshold=%s, junk_flows=%s \n" % (PCOUNT_DTIME_EXPT,len(pcount_window_sizes), PCOUNT_WINDOW_SIZE, len(relevant_trees), PCOUNT_TRUE_LOSS_PERCENTAGE, PCOUNT_LOSS_THRESHOLD, PCOUNT_CURR_NUM_JUNKFLOWS)
   print msg #want to print so we know our progress when running our experiments
+  log.info(msg)
+  
+  if PCOUNT_DTIME_EXPT:
+    install_junk_flow_entries(controller, u_switch_id, d_switch_id)
   
   #pcounter.pcount_session(controller,u_switch_id,d_switch_id,relevant_trees,strip_vlan_switch_ids,PCOUNT_WINDOW_SIZE)
-  Timer(PCOUNT_CALL_FREQUENCY, pcounter.pcount_session, args=[controller, u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_ids, PCOUNT_WINDOW_SIZE], recurring=True, selfStoppable=True)
+  pcounter.pcount_session(controller, u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_ids, PCOUNT_WINDOW_SIZE)
+  #Timer(PCOUNT_CALL_FREQUENCY, pcounter.pcount_session, args=[controller, u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_ids, PCOUNT_WINDOW_SIZE], recurring=True, selfStoppable=True)
 
 
 def setup_and_start_next_expt(controller, prev_num_monitored_flows, current_highest_priority_flow_num):
-	
-	move_to_next_sim = False
-	#num_monitor_flows = prev_num_monitored_flows-1
-	subtract_val = float(float(PCOUNT_NUM_UNICAST_FLOWS) / float(4))
-	subtract_val = int(subtract_val) + 1
-	num_monitor_flows = prev_num_monitored_flows - subtract_val
+  
+  move_to_next_sim = False
+  #num_monitor_flows = prev_num_monitored_flows-1
+  subtract_val = float(float(PCOUNT_NUM_UNICAST_FLOWS) / float(4))
+  subtract_val = int(subtract_val) + 1
+  num_monitor_flows = prev_num_monitored_flows - subtract_val
   
   
 
-	if num_monitor_flows < 1:
-		num_monitor_flows = 1
-	if prev_num_monitored_flows == 1:
-		move_to_next_sim = True
-		num_monitor_flows = PCOUNT_NUM_UNICAST_FLOWS
-	if PCOUNT_DTIME_EXPT:
-		num_monitor_flows = prev_num_monitored_flows * 2
-		move_to_next_sim =True
+  if num_monitor_flows < 1:
+    num_monitor_flows = 1
+  if prev_num_monitored_flows == 1:
+    move_to_next_sim = True
+    num_monitor_flows = PCOUNT_NUM_UNICAST_FLOWS
+  if PCOUNT_DTIME_EXPT:
+    if prev_num_monitored_flows == 1: num_monitor_flows = prev_num_monitored_flows + 49
+    else: num_monitor_flows = prev_num_monitored_flows + 50 
+    move_to_next_sim = True
     
-	end_experiment_flag = set_pcount_expt_params(num_monitor_flows, PCOUNT_NUM_UNICAST_FLOWS, PCOUNT_TRUE_LOSS_PERCENTAGE, move_to_next_sim)
+  end_experiment_flag,num_monitor_flows = set_pcount_expt_params(num_monitor_flows, PCOUNT_NUM_UNICAST_FLOWS, PCOUNT_TRUE_LOSS_PERCENTAGE, move_to_next_sim)
 
-	if end_experiment_flag:
-		print "Appleseed Controller program terminated.	Press Enter to Exit Mininet script."
-		os._exit(0)
+  if end_experiment_flag:
+    print "Appleseed Controller program terminated.  Press Enter to Exit Mininet script."
+    os._exit(0)
 
-	global global_current_high_priority
-	global_current_high_priority = current_highest_priority_flow_num
-	start_pcount(controller, controller.monitored_links, controller.primary_trees, num_monitor_flows)
-	log.debug("at time = %s, returning False at pcount_session()" % (time.time()))
+  global global_current_high_priority
+  global_current_high_priority = current_highest_priority_flow_num
+  start_pcount(controller, controller.monitored_links, controller.primary_trees, num_monitor_flows)
 
 class PCountSession (EventMixin):
   """ Single PCount session: measure the packet loss for flow, f, between an upstream switch and downstream switches, for a specified window of time
   
   """
   
-  def __init__ (self):
+  def __init__ (self,u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_id, window_size):
 
     #  Copy of the version maintained at fault_tolerant_controller.   
     #self.depracated_flowTables = {} #for each switch keep track of flow tables (switchId --> flow-table-entry), specifically (dpid --> ofp_flow_mod).
     #self.depracated_arpTable = {}
     
     self.current_highest_priority_flow_num = global_current_high_priority
-		  																				#of.OFP_DEFAULT_PRIORITY + global_vlan_id
+                                              #of.OFP_DEFAULT_PRIORITY + global_vlan_id
     log.debug("Current Highest Priority Flow Initalized to %s and global_vlan_id=%s" % (self.current_highest_priority_flow_num, global_vlan_id))
 
     self.arpTable = {}
     self.flowTables = {}
     
     self.controller = None
+    
+    self.u_switch_id = u_switch_id
+    self.d_switch_id = d_switch_id
+    self.relevant_trees = relevant_trees
+    self.strip_vlan_switch_id = strip_vlan_switch_id
+    self.window_size = window_size
  
  
   def pcount_session(self, controller, u_switch_id, d_switch_id, relevant_trees, strip_vlan_switch_id, window_size):
@@ -242,9 +290,9 @@ class PCountSession (EventMixin):
     window_size -- window is the length (in seconds) of the sampling window
     
     """
-    if controller.turn_pcount_off:
-    	setup_and_start_next_expt(controller, len(relevant_trees), self.current_highest_priority_flow_num)
-    	return False
+#    if controller.turn_pcount_off:
+#      setup_and_start_next_expt(controller, len(relevant_trees), self.current_highest_priority_flow_num)
+#      return False
     
     self.arpTable = controller.arpTable
     self.flowTables = controller.flowTables
@@ -618,9 +666,9 @@ def handle_u_node_query_result (event, controller):
   # pcount_results = get_pcount_results_obj(self.controller, (u_switch_id,d_switch_id), PCOUNT_WINDOW_SIZE, len(relevant_trees))
   monitored_link = None
   for link in controller.monitored_links.keys():
-  	if link[0] == u_switch_id:
-  		monitored_link = link 
-  		
+    if link[0] == u_switch_id:
+      monitored_link = link 
+      
   curr_results = get_pcount_results_obj(controller, monitored_link, PCOUNT_WINDOW_SIZE, PCOUNT_NUM_MONITOR_FLOWS)
 #  for pcount_result in controller.pcount_link_results.values():
 #    if pcount_result.monitored_link[0] == u_switch_id:
@@ -637,8 +685,10 @@ def handle_u_node_query_result (event, controller):
         vlan_id = flow_action.vlan_vid
   
   curr_results.update_u_node_results(packet_count, vlan_id)
-    
-
+  
+  start_next_pcount_session(curr_results.move_nxt_window_session,curr_results.move_nxt_expt_setting)
+  curr_results.move_nxt_window_session = False
+  curr_results.move_nxt_expt_setting = False
 
 def handle_d_node_aggregate_flow_stats (event, controller):
   d_switch_id = event.connection.dpid
@@ -646,34 +696,56 @@ def handle_d_node_aggregate_flow_stats (event, controller):
   
   monitored_link = None
   for link in controller.monitored_links.keys():
-		if link[1] == d_switch_id:
-			monitored_link = link
+    if link[1] == d_switch_id:
+      monitored_link = link
   
   curr_results = get_pcount_results_obj(controller, monitored_link, PCOUNT_WINDOW_SIZE, PCOUNT_NUM_MONITOR_FLOWS)
   
   pkt_cnt = event.stats.packet_count
   log.debug("d_node aggregate query result at s%s = %s" % (d_switch_id, pkt_cnt))  
   curr_results.update_d_node_results(pkt_cnt)
+  
+  start_next_pcount_session(curr_results.move_nxt_window_session,curr_results.move_nxt_expt_setting)
+  curr_results.move_nxt_window_session = False
+  curr_results.move_nxt_expt_setting = False
 
-
+	#TODO check if should start next pcount session
+	
+def start_next_pcount_session(move_nxt_window_session,move_nxt_expt_setting):
+	"""  """
+	if move_nxt_window_session == False and move_nxt_expt_setting == False:
+		return
+	
+	if move_nxt_window_session:
+		Timer(1, curr_pcount_session.pcount_session, args=[curr_pcount_session.controller, curr_pcount_session.u_switch_id, curr_pcount_session.d_switch_id, curr_pcount_session.relevant_trees,
+																				 curr_pcount_session.strip_vlan_switch_id, curr_pcount_session.window_size])
+		log.debug("starting next pcount_session for same window (w=%s) and same settings as previous pcount session" %(curr_pcount_session.window_size))
+	elif move_nxt_expt_setting:
+		Timer(1,setup_and_start_next_expt, args=[curr_pcount_session.controller, len(curr_pcount_session.relevant_trees), curr_pcount_session.current_highest_priority_flow_num ])
+		log.debug("making call to setup_and_start_next_expt() ")
+	
 def find_vlan(event):
   vlan = -1
   
   return vlan
  
 def get_pcount_results_obj(controller, link, window_size, num_monitored_flows):
-	for result in controller.pcount_link_results[link]:
-		if float(result.window_size) == float(window_size) and int(result.num_monitored_flows) == int(num_monitored_flows):
-			return result
-		
-	msg = "no matching PCountResults object found for l=%s with w=%s and num_monitored_flows=%s." % (link, window_size, num_monitored_flows)
-	raise appleseed.AppleseedError(msg)
-		
+  for result in controller.pcount_link_results[link]:
+  	if PCOUNT_DTIME_EXPT:
+  		if float(result.window_size) == float(window_size) and int(result.num_monitored_flows) == int(num_monitored_flows) and int(PCOUNT_CURR_NUM_JUNKFLOWS) == int(result.num_junk_flows):
+				return result
+  	else:
+  		if float(result.window_size) == float(window_size) and int(result.num_monitored_flows) == int(num_monitored_flows):
+  			return result
+    
+  msg = "no matching PCountResults object found for l=%s with w=%s and num_monitored_flows=%s." % (link, window_size, num_monitored_flows)
+  raise appleseed.AppleseedError(msg)
+    
 
 
 class PCountResults():
   
-  def __init__(self, controller, start_vlan_id, window_size= -1, loss_threshold= -1):
+  def __init__(self, controller, start_vlan_id,window_size= -1, loss_threshold= -1,num_junk_flows=0):
     self.d_node_count = {}  # vlan_id --> value
     self.u_node_count = {}  # vlan_id --> value
     
@@ -681,6 +753,7 @@ class PCountResults():
     self.detect_total_pkt_dropped = {}  # vlan_id --> value
     self.estimated_loss_ratio = {}  # vlan_id --> value
     #self.estimated_loss_ratio = {}  # vlan_id --> value
+    self.num_junk_flows=num_junk_flows #only used for PCOUNT_DTIME_EXPT
     
     self.loss_threshold = loss_threshold
     self.window_size = window_size
@@ -692,6 +765,9 @@ class PCountResults():
     self.detect_pkt_dropped_gt_threshold_time = {}  # vlan_id --> value
     self.num_monitored_flows = -1
     self.monitored_link = -1
+    
+    self.move_nxt_window_session = False
+    self.move_nxt_expt_setting = False
     
     self.curr_num_u_node_results = 0
     self.curr_vlan_id = start_vlan_id 
@@ -709,7 +785,7 @@ class PCountResults():
   def update_u_node_results(self, pkt_cnt, vlan_id):
     
     if self.curr_num_u_node_results >= self.num_monitored_flows:
-      msg = "ERROR. PCountResults instance must be getting duplicate u_node query results at vlan=%s" % (vlan_id)
+      msg = "ERROR. PCountResults instance must be getting duplicate u_node query results at vlan=%s. Already have %s u_node results but only monitoring %s flows" % (vlan_id,self.curr_num_u_node_results,self.num_monitored_flows)
       raise appleseed.AppleseedError(msg)
     
     if self.u_node_count.has_key(vlan_id):
@@ -746,19 +822,16 @@ class PCountResults():
     if self.check_threshold(vlan_id, detected_drops):
       if IS_PCOUNT_EXP:
         self.detect_total_pkt_dropped[vlan_id] = detected_drops
-       
-        #multiplier = float(float(PCOUNT_NUM_UNICAST_FLOWS)/float(self.num_monitored_flows))
-        #estimated_loss_rate = float(float(detected_drops)/float(self.window_size)) * multiplier #TODO: not sure if this is correct
         total_packets = self.u_node_count[vlan_id]
-	estimated_loss_ratio = 0
-	if total_packets > 0:
+        estimated_loss_ratio = 0
+        if total_packets > 0:
         	estimated_loss_ratio = float(float(detected_drops) / float(total_packets))
         self.estimated_loss_ratio[vlan_id] = estimated_loss_ratio
-	print "\t result output for session %s" % (vlan_id)
+        print "\t result output for session %s" % (vlan_id)
         self.log_pcount_detect_time_results()
         self.log_pcount_results()
       else:
-        self.controller.turn_pcount_off = True
+        #self.controller.turn_pcount_off = True
         self.controller.activate_backup_trees(self.monitored_link)
       
         self.detect_total_pkt_dropped[vlan_id] = detected_drops
@@ -769,7 +842,6 @@ class PCountResults():
     
     self.check_window_sample_quota()
     
-
   def check_threshold(self, vlan_id, pkt_loss_cnt):
     """ Checks if the pkt_loss_cnt exceeds a threshold""" 
     if pkt_loss_cnt > PCOUNT_LOSS_THRESHOLD:
@@ -806,41 +878,46 @@ class PCountResults():
         w.writerow([session_num, self.window_size, self.num_monitored_flows, u_count, d_count, detected_drops, estimated_loss_ratio])
 
   def check_window_sample_quota(self):
-		""" (1) check if enough samples taken, If yes: (2) stop pcount session, (3) compute the detect_time_mean and confidence interval + output to file (4) setup constructs for expts on next window size """
-		if len(self.detect_time) < PCOUNT_SAMPLE_QUOTA:
-			return
-		
-		# stop pcount session
-		self.controller.turn_pcount_off = True
-	
-		loss_ratio_mean = stats.computeMean(self.estimated_loss_ratio.values())
-		loss_ratio_conf_interval = stats.computeConfInterval(self.estimated_loss_ratio.values(), 90)		
-		
-		detect_time_mean = stats.computeMean(self.total_detection_time_results.values())
-		detect_time_conf_interval = stats.computeConfInterval(self.total_detection_time_results.values(), 90)
-		
-		# log the results
-		num_runs = len(self.detect_time)
-		window_results = [self.window_size, self.num_monitored_flows, num_runs, detect_time_mean, detect_time_conf_interval[0], detect_time_conf_interval[1], loss_ratio_mean, loss_ratio_conf_interval[0], loss_ratio_conf_interval[1]]
-		global pcount_window_detect_time_results
-		pcount_window_detect_time_results.append(window_results)
-		log_all_window_detect_time_results(self.window_size)
-		
-		#setup constructs for expts on next window size
-		log.debug("At time = %s, logging complete of w=%s results and controller.turn_pcount_off = %s" % (time.time(), self.window_size, self.controller.turn_pcount_off))
-		
-		
+    """ (1) check if enough samples taken, If yes: (2) stop pcount session, (3) compute the detect_time_mean and confidence interval + output to file (4) setup constructs for expts on next window size """
+    if len(self.detect_time) < PCOUNT_SAMPLE_QUOTA:
+    	self.move_nxt_window_session = True
+    	return 
+    
+    # stop pcount session
+    #self.controller.turn_pcount_off = True
+  
+    loss_ratio_mean = stats.computeMean(self.estimated_loss_ratio.values())
+    loss_ratio_conf_interval = stats.computeConfInterval(self.estimated_loss_ratio.values(), 90)    
+    
+    detect_time_mean = stats.computeMean(self.total_detection_time_results.values())
+    detect_time_conf_interval = stats.computeConfInterval(self.total_detection_time_results.values(), 90)
+    
+    # log the results
+    num_runs = len(self.detect_time)
+    window_results = [self.window_size, self.num_monitored_flows, num_runs, detect_time_mean, detect_time_conf_interval[0], detect_time_conf_interval[1], loss_ratio_mean, loss_ratio_conf_interval[0], loss_ratio_conf_interval[1]]
+    
+    if PCOUNT_DTIME_EXPT:
+      window_results.append(PCOUNT_CURR_NUM_JUNKFLOWS)
+    
+    global pcount_window_detect_time_results
+    pcount_window_detect_time_results.append(window_results)
+    log_all_window_detect_time_results(self.window_size)
+    
+    #setup constructs for expts on next window size
+    #log.debug("At time = %s, logging complete of w=%s results and controller.turn_pcount_off = %s" % (time.time(), self.window_size, self.controller.turn_pcount_off))
+    
+    self.move_nxt_expt_setting = True
 
 def log_all_window_detect_time_results(window_size):
-	loss_percent = int(PCOUNT_TRUE_LOSS_PERCENTAGE * 1)
-	w = csv.writer(open("ext/results/current/pcount-results-l%s-u%s.csv" % (loss_percent, PCOUNT_NUM_UNICAST_FLOWS), "w"))
-	
-	if PCOUNT_DTIME_EXPT:
-		w = csv.writer(open("ext/results/current/pcount-dtimes-w%s-f%s.csv" % (window_size, PCOUNT_MAX_NUM_MONITORS), "w"))
+  loss_percent = int(PCOUNT_TRUE_LOSS_PERCENTAGE * 1)
+  w = csv.writer(open("ext/results/current/pcount-loss-l%s-u%s.csv" % (loss_percent, PCOUNT_NUM_UNICAST_FLOWS), "w"))
   
-	for row in pcount_window_detect_time_results:
-		w.writerow(row)
-		
-	
-	
-		
+  if PCOUNT_DTIME_EXPT:
+    w = csv.writer(open("ext/results/current/pcount-dtimes-w%s-j%s.csv" % (window_size, PCOUNT_MAX_NUM_JUNKFLOWS), "w"))
+  
+  for row in pcount_window_detect_time_results:
+    w.writerow(row)
+    
+  
+  
+    

@@ -102,10 +102,14 @@ if args.log: print "\n starting appleseed controller as Remote Controller"
 sys.path.append('/home/mininet/appleseed')
 
 start_assed_cmd = None
-if args.log:
+if args.dtime and args.log:
 	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', '--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows), '--true_loss_percentage=%s ' %(args.loss),'--dtime=%s' %(args.dtime),'openflow.discovery','log', '--file=ext/results/pcount.log,w'] 
-else:
+elif args.dtime:
 	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed','--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows),'--true_loss_percentage=%s ' %(args.loss), '--dtime=%s' %(args.dtime),'openflow.discovery'] 
+elif args.log:
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed', '--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows), '--true_loss_percentage=%s ' %(args.loss),'openflow.discovery','log', '--file=ext/results/pcount.log,w'] 
+else:
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed','--num_monitor_flows=%s' %(num_monitor_flows),'--num_unicast_flows=%s' %(num_unicast_flows),'--true_loss_percentage=%s ' %(args.loss), 'openflow.discovery'] 
 
 os.chdir('/home/mininet/appleseed')
 pid = Popen(start_aseed_cmd,shell=False).pid

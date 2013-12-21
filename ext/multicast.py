@@ -1611,7 +1611,7 @@ class PrimaryTree (MulticastTree):
     MulticastTree.__init__(self, **kwargs)
     self.backup_trees = {} #edge --> BackupTree
     self.next_bid = 1
-    
+
   def install(self):
     
     if len(self.edges) == 0:

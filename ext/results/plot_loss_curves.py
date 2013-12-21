@@ -27,8 +27,9 @@ def plot_loss_rate(data_file,base_loss_ratio,sd_flag=False):
 		mf = int(row[1])
 		if mf > max_mf:
 			max_mf = mf
-	
+	#'orange'                 : '#ffa500',     # 255, 165,   0
 	colors=['blue','green','red','magenta','cyan','yellow']
+  #colors=['blue','green','#ffa500','red','magenta','cyan','yellow']
 	#alphas=['0.2','0.3','0.4','0.5','0.6','0.7'] 
 	alphas=['0.3','0.4','0.5','0.6','0.7','0.8'] 
 	#alphas=['0.1','0.3','0.5','0.7','0.9','1'] 
@@ -36,7 +37,8 @@ def plot_loss_rate(data_file,base_loss_ratio,sd_flag=False):
 	
 	plt.clf()
 	print "Generating PCount Loss Rate plot using data_file %s ..." %(data_file)
-	max_window=4.5
+	max_window=7 
+  #max_window=7
 	for i in range(1,max_mf+1):
 		x = list()
 		y = list()
@@ -98,8 +100,8 @@ def plot_loss_rate(data_file,base_loss_ratio,sd_flag=False):
 		type_str = "ci"
 	plt.xlabel("Windows Size (in seconds)")
 	plt.ylabel("Estimated Loss Ratio (seconds)")
-	plt.xlim(0.5,4.5)
-	plt.legend(loc='upper right')
+	plt.xlim(0.5,7)
+	plt.legend(loc='lower right')
 	#plt.show()
 	
 	#fig_name = data_file.split(".")
@@ -184,9 +186,10 @@ def plot_all_detect_time(sd_flag=False):
 		l_str = data_file.split("-")[2]
 		plot_detection_time(data_file, sd_flag)
 
-rate_folder = 'rate/'
-figs_folder = 'rate/figs/'
-data_files = ['pcount-results-l10-u5.csv','pcount-results-l5-u5.csv','pcount-results-l1-u5.csv']
+rate_folder = 'loss/'
+figs_folder = 'loss/figs/'
+#data_files = ['pcount-loss-l10-u5.csv','pcount-loss-l5-u5.csv','pcount-loss-l1-u5.csv']
+data_files = ['pcount-loss-l5-u10.csv']
 plot_loss_flag = True
 plot_detect_time_flag = False
 if plot_loss_flag:
@@ -194,7 +197,7 @@ if plot_loss_flag:
 	#plot_all_loss_rate(sd_flag=False)
 
 if plot_detect_time_flag:
-	plot_all_detect_time(sd_flag=True)
+	#plot_all_detect_time(sd_flag=True)
 	plot_all_detect_time(sd_flag=False)
 	
 

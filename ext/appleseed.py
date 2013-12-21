@@ -460,7 +460,7 @@ class fault_tolerant_controller (EventMixin):
 
 
 
-def launch (is_backup_tree_expt = False,num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1,dtime=False):
+def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1,dtime=False,is_backup_tree_expt = False):
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
     discovery.LINK_TIMEOUT = LINK_TIMEOUT
@@ -471,9 +471,11 @@ def launch (is_backup_tree_expt = False,num_monitor_flows=-1,num_unicast_flows=-
     #controller = fault_tolerant_controller()
     #controller.algorithm_mode = multicast.Mode.BASELINE
     pcount_all.PCOUNT_DTIME_EXPT = bool(dtime)
+    log.debug("PCOUNT_DTIME_EXPT=%s" %(bool(dtime)))
+    print "PCOUNT_DTIME_EXPT=%s" %(bool(dtime))
     if bool(dtime):
       num_monitor_flows = 1
-    pcount_all.set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage)
+    pcount_all.set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage,True)
     core.registerNew(fault_tolerant_controller)
   else:
     if bool(is_backup_tree_expt):

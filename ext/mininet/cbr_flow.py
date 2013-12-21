@@ -8,7 +8,7 @@ rate = sys.argv[3]
 
 # dst_id can either be a digit (for pcount expt) or an mcast addr for backup_expt)
 dst_ip = dst_id
-if not "." in dst_id
+if not "." in dst_id:
 	dst_ip = "10.0.0.%s" %(dst_id)
 
 wait_time = 1/float(rate)

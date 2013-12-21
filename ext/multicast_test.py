@@ -912,7 +912,6 @@ def test_backups_h6s9_3trees():
   controller.mcast_groups[mcast_addr] = [root]+terminal_hosts
   multicast.create_install_merged_primary_tree_flows(controller)
   
-
   expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:1}
   
   test_name = "test_backups_h6s9_3trees()"
