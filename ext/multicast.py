@@ -21,6 +21,8 @@ import appleseed
 import pcount_all
 import time
 log = core.getLogger("multicast")
+import SteinerArborescence
+import networkx as nx
 
 
 #################### Start of Hard-coded IP addresses and config files ####################
@@ -209,8 +211,14 @@ def generate_multicast_groups(controller,backup_tree_expt=False):
   # add each multicast group to controller.mcast_groups
   
 def compute_primary_trees(controller):
-  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approxiation goes. """
+  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approximation goes. """
   num_switches = len(core.openflow_discovery._dps)
+  
+  Steiner_Arb = SteinerArborescence()
+  
+  # Compute a Primary Tree for each Mcast Group given. 
+  # Then for each Primary Tree, compute all possible backups (for Min-Control).
+  # For min-flow, we might need to be more flexible so we should build accordingly.
   
   for mcast_addr in controller.mcast_groups.keys():
     
@@ -225,54 +233,56 @@ def compute_primary_trees(controller):
     #       this will replace the hard-coded mutlicast trees created below (although keep those hard-coded trees because they are good for testing :) )
     
     # NICK: the commented code below is some starter code to set up the call the computing the Steiner Arboresence
-#    flag_to_run_nicks_code = True
-#    if flag_to_run_nicks_code == True:
-#      adjacency_list = controller.adjacency.keys()
-#      root_id = find_node_id(root)
-#      terminal_ids = list()
-#      for host in terminal_hosts:
-#        terminal_ids.append(find_node_id(host))
-#      
-#      # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
-#      edges = compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
-#      
-#      data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
-#      tree = PrimaryTree(**data)
-#      controller.primary_trees.append(tree)
-#      continue
+   
+    flag_to_run_nicks_code = True
+    if(flag_to_run_nicks_code == True):
+     adjacency_list = controller.adjacency.keys()
+     root_id = find_node_id(root)
+     terminal_ids = list()
+     for host in terminal_hosts:
+       terminal_ids.append(find_node_id(host))
+     
+     # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
+     edges = Steiner_Arb.compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
+     
+     data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+     tree = PrimaryTree(**data)
+     controller.primary_trees.append(tree)
+     continue
     
-    # some temporary hard-coding going on here 
-    if mcast_addr == mcast_ip_addr1:
-      if num_switches == 4 and len(end_hosts) == 3: #H3S4
-        edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
-      elif num_switches == 6 and len(end_hosts) == 3: #H9S6
-        edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
-      elif num_switches == 8 and len(end_hosts) == 4: #H4S8
-        edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
-      elif num_switches == 9 and len(end_hosts) == 4: #H6S9
-        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-      elif num_switches == 10 and len(end_hosts) == 4: #H6S10
-        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-      else:
-        msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-        log.error(msg)
-        raise appleseed.AppleseedError(msg)
-    elif mcast_addr == mcast_ip_addr2:
-      if num_switches == 6 and len(end_hosts) == 6:  #H9S6
-        edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
-      elif num_switches == 9 and len(end_hosts) == 5: #H6S9
-        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-      elif num_switches == 10 and len(end_hosts) == 5: #H6S10
-        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-      else:
-        msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-        log.error(msg)
-        raise appleseed.AppleseedError(msg)
-    elif mcast_addr == mcast_ip_addr3:
-      if num_switches == 10 and len(end_hosts) == 4: #H6S10
-        edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
-    data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
-    tree = PrimaryTree(**data)
+    # # some temporary hard-coding going on here 
+    # if mcast_addr == mcast_ip_addr1:
+    #   if num_switches == 4 and len(end_hosts) == 3: #H3S4
+    #     edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
+    #   elif num_switches == 6 and len(end_hosts) == 3: #H9S6
+    #     edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
+    #   elif num_switches == 8 and len(end_hosts) == 4: #H4S8
+    #     edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
+    #   elif num_switches == 9 and len(end_hosts) == 4: #H6S9
+    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+    #   elif num_switches == 10 and len(end_hosts) == 4: #H6S10
+    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+    #   else:
+    #     msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+    #     log.error(msg)
+    #     raise appleseed.AppleseedError(msg)
+    # elif mcast_addr == mcast_ip_addr2:
+    #   if num_switches == 6 and len(end_hosts) == 6:  #H9S6
+    #     edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
+    #   elif num_switches == 9 and len(end_hosts) == 5: #H6S9
+    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+    #   elif num_switches == 10 and len(end_hosts) == 5: #H6S10
+    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+    #   else:
+    #     msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+    #     log.error(msg)
+    #     raise appleseed.AppleseedError(msg)
+    # elif mcast_addr == mcast_ip_addr3:
+    #   if num_switches == 10 and len(end_hosts) == 4: #H6S10
+    #     edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
+    
+    # data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+    # tree = PrimaryTree(**data)
     
     controller.primary_trees.append(tree)
 
@@ -389,7 +399,7 @@ def get_group_tag(controller,trees,curr_tree_id,u_node,outport,shared_trees,d_no
   return new_tag,new_tag
 
 
-def  get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=False):  
+def get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=False):  
   """ Try to reuse a signle_tag if possible (i.e., when match at u_node using SINGLE).  Otherwise return the tree's default value. 
   
       return action value, match value.  These values are different if u_node has group processing for tree_id
@@ -1346,56 +1356,80 @@ def install_all_trees(controller,backup_tree_expt=False):
   
   compute_backup_trees(controller)
   
+def compute_edge_backup_trees(controller, backup_edge):
+
+  """ 
+  Compute backup_trees for each primary tree using the given backup_edge
+  Arguments:
+    controller -- appleseed.fault_tolerant_controller isntance
+    backup_edge -- tuple (u,d) where u is the node_id (int) of the upstream node and d is the node id of the downstream node
+  """
+  
+  # (1) what primary trees use backup_edge
+  relevant_trees = find_affected_primary_trees(controller.primary_trees,backup_edge)
+  # (2) for each relevant primary tree, make a call to compute the backup tree
+  for primary_tree in relevant_trees:
+    # this assumes we are returned a list of edges, (where each edge is a tuple)
+    backup_tree_edges = nicks_steiner_arboresence(controller.adjacency.keys(),primary_tree,backup_edge) # primary_tree is PrimaryTree objectect
+    data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
+    backup_tree = BackupTree(**data)
+    primary_tree.backup_trees[backup_edge] = backup_tree
+    if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+      backup_tree.preinstall_baseline_backups()
+  if controller.algorithm_mode == Mode.MERGER:    
+    create_merged_backup_tree_flows(controller)
+  
   
 def compute_backup_trees(controller):
   """ Short-term: hard-coded backup tree + assume only one backup tree per primary tree"""
   num_switches = len(core.openflow_discovery._dps)
   
+  Steiner_Arb = SteinerArborescence()
+  
   for primary_tree in controller.primary_trees:  # self-note: would require another loop to precompute backups for ALL links
     end_hosts = controller.mcast_groups[primary_tree.mcast_address]   # this is the root and all terminal nodes
     backup_tree_edges = []
     backup_edge = ()
-    
     # NICK. this is where you should insert your backup tree computation.  Below is some starter code, that sets up the call to your function "compute_backup_trees"
+    flag_to_run_nicks_code = True
+    if flag_to_run_nicks_code == True:
+       adjacency_list = controller.adjacency.keys()
+       root_id = find_node_id(primary_tree.root_ip_address)
+       terminal_ids = list()
+       for host in primary_tree.terminal_ip_addresses:
+         terminal_ids.append(find_node_id(host))
+       
+       for backup_edge in primary_tree.edges:
+         upstream_node_id = backup_edge[0]
+         downstream_node_id = backup_edge[1]
+         if primary_tree.is_host(upstream_node_id) or primary_tree.is_host(downstream_node_id):
+           continue  # We don't need to compute backup trees for edges to and from a host.
+         
+         # NICK: replace "compute_backup_tree()" with the name of your function.  
+         # remove the backup_edge from G' and set the edge weights of each primary_tree edge to 0
+         backup_tree_edges = Steiner_Arb.compute_backup_tree(adjacency_list,root_id,terminal_ids,primary_tree.edges,backup_edge)
+         
+         data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
+               "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
+         backup_tree = BackupTree(**data)
+         primary_tree.backup_trees.append(backup_tree) 
+       
+         if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+           backup_tree.preinstall_baseline_backups()
+     
+    continue
     
-#    flag_to_run_nicks_code = True
-#    if flag_to_run_nicks_code == True:
-#      adjacency_list = controller.adjacency.keys()
-#      root_id = find_node_id(primary_tree.root_ip_address)
-#      terminal_ids = list()
-#      for host in primary_tree.terminal_ip_addresses:
-#        terminal_ids.append(find_node_id(host))
-#      
-#      for backup_edge in primary_tree.edges:
-#        upstream_node_id = backup_edge[0]
-#        downstream_node_id = backup_edge[1]
-#        if primary_tree.is_host(upstream_node_id) or primary_tree.is_host(downstream_node_id):
-#          continue  # We don't need to compute backup trees for edges to and from a host.
-#        
-#        # NICK: replace "compute_backup_tree()" with the name of your function.  
-#        backup_tree_edges = compute_backup_tree(adjacency_list,root_id,terminal_ids,primary_tree.edges,backup_edge)  # remove the backup_edge from G' and set the edge weights of each primary_tree edge to 0
-#        
-#        data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
-#              "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
-#        backup_tree = BackupTree(**data)
-#        primary_tree.backup_trees.append(backup_tree) 
-#      
-#        if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
-#          backup_tree.preinstall_baseline_backups()
-#      
-#      continue
-    
-    if primary_tree.mcast_address == mcast_ip_addr1:
-      if num_switches == 8 and len(end_hosts) == 4: #H4S8
-        backup_tree_edges = [(1,5),(5,11),(11,7),(11,12),(12,10),(12,9),(7,2),(9,3),(10,4)]
-        backup_edge = (5,6)
-      if num_switches == 9 and len(end_hosts) == 4: #H6S9
-        backup_tree_edges = [(1,7),(7,13),(13,9),(13,14),(14,12),(14,11),(9,2),(11,3),(12,4)]
-        backup_edge = (7,8)
-    if primary_tree.mcast_address == mcast_ip_addr2:
-      if num_switches == 9 and len(end_hosts) == 5: #H6S9
-        backup_tree_edges = [(5,7),(7,13),(13,9),(13,14),(14,12),(14,11),(12,15),(9,2),(11,3),(12,4),(15,6)]
-        backup_edge = (7,8)
+    # if primary_tree.mcast_address == mcast_ip_addr1:
+    #   if num_switches == 8 and len(end_hosts) == 4: #H4S8
+    #     backup_tree_edges = [(1,5),(5,11),(11,7),(11,12),(12,10),(12,9),(7,2),(9,3),(10,4)]
+    #     backup_edge = (5,6)
+    #   if num_switches == 9 and len(end_hosts) == 4: #H6S9
+    #     backup_tree_edges = [(1,7),(7,13),(13,9),(13,14),(14,12),(14,11),(9,2),(11,3),(12,4)]
+    #     backup_edge = (7,8)
+    # if primary_tree.mcast_address == mcast_ip_addr2:
+    #   if num_switches == 9 and len(end_hosts) == 5: #H6S9
+    #     backup_tree_edges = [(5,7),(7,13),(13,9),(13,14),(14,12),(14,11),(12,15),(9,2),(11,3),(12,4),(15,6)]
+    #     backup_edge = (7,8)
     
     if len(backup_tree_edges) == 0:
       msg = "no backup trees edges are specified for T%s" %(primary_tree.id)

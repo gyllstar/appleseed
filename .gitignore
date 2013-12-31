@@ -40,3 +40,7 @@ ext/topos/topology_generator-depracted.py
 /ext/results/gen_loss_results.py
 
 /ext/results/final-figs/
+/startVM.sh
+/closeVM.sh
+/appleseed.sublime-project
+/appleseed.sublime-workspace
