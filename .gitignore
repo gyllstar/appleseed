@@ -29,3 +29,12 @@ ext/topos/topology_generator-depracted.py
 /ext/results/bern.out
 
 /ext/doc/debugging/
+
+/ext/results/loss/
+
+/ext/results/dtime/
+
+/ext/results/plot_loss_curves.py
+/ext/results/plot_dtime.py
+/ext/results/plot_bernoulli.py
+/ext/results/gen_loss_results.py
