@@ -1445,6 +1445,12 @@ def find_affected_primary_trees(primary_trees,failed_link):
   return affected_trees
       
 
+def get_tree_default_tag(id):
+  id_str = "%s" %(id)
+  if id<10:
+    id_str = "0%s" %(id)
+  return EthAddr('AA:AA:AA:AA:AA:%s' %(id_str))
+
 #####################################################################################################
 
 class MulticastTree ():
@@ -1457,8 +1463,13 @@ class MulticastTree ():
     self.terminal_ip_addresses = kwargs["terminals"]
     self.adjacency = kwargs["adjacency"]
     self.controller = kwargs["controller"]
-    self.id = find_node_id(self.root_ip_address)
-    self.default_tag = Tag(TagType.SINGLE, tree_default_tags[self.id])
+    self.id=-1
+    if 'id' in kwargs:
+      self.id = kwargs['id']
+    else:
+      self.id = find_node_id(self.root_ip_address)
+    #self.default_tag = Tag(TagType.SINGLE, tree_default_tags[self.id])
+    self.default_tag = Tag(TagType.SINGLE, get_tree_default_tag(self.id))
     
   def find_ip_address(self,id):
     

@@ -188,7 +188,7 @@ for host_num in range(1,num_unicast_flows+1):
 	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(host_num,dst_id,rate,host_num)
 	#cmd = 'sudo ping -c50 10.0.0.%s > ~/cbr/h%s_ping.out &' %(dst_id,host_num)
 	if args.log: print cmd
-	host.cmd(cmd)
+	if not args.dtime: host.cmd(cmd)
 
 #CLI(net)
 

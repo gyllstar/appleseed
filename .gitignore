@@ -25,3 +25,7 @@ ext/topos/topology_generator-depracted.py
 /ext/results/alt_plot.py
 
 *.log
+
+/ext/results/bern.out
+
+/ext/doc/debugging/
