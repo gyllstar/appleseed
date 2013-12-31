@@ -21,7 +21,7 @@ import appleseed
 import pcount_all
 import time
 log = core.getLogger("multicast")
-import SteinerArborescence
+from SteinerArborescence import SteinerArborescence
 import networkx as nx
 
 
@@ -209,6 +209,61 @@ def generate_multicast_groups(controller,backup_tree_expt=False):
   
   
   # add each multicast group to controller.mcast_groups
+
+  
+def compute_hard_coded_primary_trees(controller):
+  """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approximation goes. """
+  num_switches = len(core.openflow_discovery._dps)
+  
+  # Compute a Primary Tree for each Mcast Group given. 
+  # Then for each Primary Tree, compute all possible backups (for Min-Control).
+  # For min-flow, we might need to be more flexible so we should build accordingly.
+  
+  for mcast_addr in controller.mcast_groups.keys():
+    
+    end_hosts = controller.mcast_groups[mcast_addr]   # this is the root and all terminal nodes
+    root = end_hosts[0]  
+    terminal_hosts = end_hosts[1:]
+    
+    #some check here for # of switches
+    edges = []
+    
+    #  some temporary hard-coding going on here 
+    if mcast_addr == mcast_ip_addr1:
+      if num_switches == 4 and len(end_hosts) == 3: #H3S4
+        edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
+      elif num_switches == 6 and len(end_hosts) == 3: #H9S6
+        edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
+      elif num_switches == 8 and len(end_hosts) == 4: #H4S8
+        edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
+      elif num_switches == 9 and len(end_hosts) == 4: #H6S9
+        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+      elif num_switches == 10 and len(end_hosts) == 4: #H6S10
+        edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
+      else:
+        msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+        log.error(msg)
+        raise appleseed.AppleseedError(msg)
+    elif mcast_addr == mcast_ip_addr2:
+      if num_switches == 6 and len(end_hosts) == 6:  #H9S6
+        edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
+      elif num_switches == 9 and len(end_hosts) == 5: #H6S9
+        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+      elif num_switches == 10 and len(end_hosts) == 5: #H6S10
+        edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
+      else:
+        msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
+        log.error(msg)
+        raise appleseed.AppleseedError(msg)
+    elif mcast_addr == mcast_ip_addr3:
+      if num_switches == 10 and len(end_hosts) == 4: #H6S10
+        edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
+    
+    data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
+    tree = PrimaryTree(**data)
+    
+    controller.primary_trees.append(tree)  
+  
   
 def compute_primary_trees(controller):
   """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approximation goes. """
@@ -249,41 +304,7 @@ def compute_primary_trees(controller):
      tree = PrimaryTree(**data)
      controller.primary_trees.append(tree)
      continue
-    
-    # # some temporary hard-coding going on here 
-    # if mcast_addr == mcast_ip_addr1:
-    #   if num_switches == 4 and len(end_hosts) == 3: #H3S4
-    #     edges = [(3,7),(7,6),(6,4),(6,5),(4,1),(5,2)]
-    #   elif num_switches == 6 and len(end_hosts) == 3: #H9S6
-    #     edges = [(3,10),(10,11),(11,12),(11,13),(12,1),(13,2)]
-    #   elif num_switches == 8 and len(end_hosts) == 4: #H4S8
-    #     edges = [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
-    #   elif num_switches == 9 and len(end_hosts) == 4: #H6S9
-    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-    #   elif num_switches == 10 and len(end_hosts) == 4: #H6S10
-    #     edges = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
-    #   else:
-    #     msg = "should be 4,6,8, or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-    #     log.error(msg)
-    #     raise appleseed.AppleseedError(msg)
-    # elif mcast_addr == mcast_ip_addr2:
-    #   if num_switches == 6 and len(end_hosts) == 6:  #H9S6
-    #     edges = [(4,10),(10,14),(10,15),(14,5),(14,6),(15,7),(15,8),(15,9)]
-    #   elif num_switches == 9 and len(end_hosts) == 5: #H6S9
-    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-    #   elif num_switches == 10 and len(end_hosts) == 5: #H6S10
-    #     edges = [(5,7),(7,8),(8,9),(8,10),(10,11),(10,12),(12,15),(9,2),(11,3),(12,4),(15,6)]
-    #   else:
-    #     msg = "should be 6 or 9 switches in topology when using the hard-coded multicast address %s, but %s switches are present." %(mcast_ip_addr2,num_switches)
-    #     log.error(msg)
-    #     raise appleseed.AppleseedError(msg)
-    # elif mcast_addr == mcast_ip_addr3:
-    #   if num_switches == 10 and len(end_hosts) == 4: #H6S10
-    #     edges = [(2,9),(9,16),(16,10),(10,11),(10,12),(12,15),(11,3),(12,4),(15,6)]
-    
-    # data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
-    # tree = PrimaryTree(**data)
-    
+
     controller.primary_trees.append(tree)
 
 def get_node(node_id):
@@ -1378,6 +1399,45 @@ def compute_edge_backup_trees(controller, backup_edge):
       backup_tree.preinstall_baseline_backups()
   if controller.algorithm_mode == Mode.MERGER:    
     create_merged_backup_tree_flows(controller)
+  
+
+def compute_hard_coded_backup_trees(controller):
+  """ Short-term: hard-coded backup tree + assume only one backup tree per primary tree"""
+  num_switches = len(core.openflow_discovery._dps)
+  
+  for primary_tree in controller.primary_trees:  # self-note: would require another loop to precompute backups for ALL links
+    end_hosts = controller.mcast_groups[primary_tree.mcast_address]   # this is the root and all terminal nodes
+    backup_tree_edges = []
+    backup_edge = ()
+
+    
+    if primary_tree.mcast_address == mcast_ip_addr1:
+      if num_switches == 8 and len(end_hosts) == 4: #H4S8
+        backup_tree_edges = [(1,5),(5,11),(11,7),(11,12),(12,10),(12,9),(7,2),(9,3),(10,4)]
+        backup_edge = (5,6)
+      if num_switches == 9 and len(end_hosts) == 4: #H6S9
+        backup_tree_edges = [(1,7),(7,13),(13,9),(13,14),(14,12),(14,11),(9,2),(11,3),(12,4)]
+        backup_edge = (7,8)
+    if primary_tree.mcast_address == mcast_ip_addr2:
+       if num_switches == 9 and len(end_hosts) == 5: #H6S9
+         backup_tree_edges = [(5,7),(7,13),(13,9),(13,14),(14,12),(14,11),(12,15),(9,2),(11,3),(12,4),(15,6)]
+         backup_edge = (7,8)
+    
+    if len(backup_tree_edges) == 0:
+      msg = "no backup trees edges are specified for T%s" %(primary_tree.id)
+      log.info(msg)
+      continue
+    
+    data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, 
+            "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
+    backup_tree = BackupTree(**data)
+    primary_tree.backup_trees[backup_edge] = backup_tree
+    
+    if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+      backup_tree.preinstall_baseline_backups()
+  
+  if controller.algorithm_mode == Mode.MERGER:    
+    create_merged_backup_tree_flows(controller)  
   
   
 def compute_backup_trees(controller):

@@ -1,6 +1,6 @@
-from sympy.utilities.iterables import permutations, multiset_partitions, partitions
+#from sympy.utilities.iterables import permutations, multiset_partitions, partitions
 import networkx as nx
-import pydot as pydot
+#import pydot as pydot
 
 class SteinerArborescence (object):
 

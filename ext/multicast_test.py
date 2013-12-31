@@ -365,7 +365,7 @@ def test_steiner_arboresence():
   # NICK: replace this with the switch ids
   list_of_switches = [7,8,9,10,11,12,13,14,15]
   core.openflow_discovery._dps = list_of_switches
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   
   #NICK: this dictionary specifies the expected results.  Each entry "a:b" is switch 'a' should have 'b' flow entries for primary trees.  To determine the correct number of flow
   #      entries for your example, you need to look at each switch, a, and determine in how many multicast trees is 'a' used?  One flow entry is created for each such multicast tree.  
@@ -391,7 +391,7 @@ def test_reactive_backups_h6s9():
   controller.adjacency = h6s9_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   multicast.create_install_merged_primary_tree_flows(controller)
   
     # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
@@ -417,7 +417,7 @@ def test_reactive_backups_h6s9():
                     }
   check_correct_flow_actions(expected_actions, test_name)
   
-  multicast.compute_backup_trees(controller)
+  multicast.compute_hard_coded_backup_trees(controller)
   
   
   set_values = [7,8,10]
@@ -488,7 +488,7 @@ def test_backups_h6s9():
   controller.adjacency = h6s9_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   multicast.create_install_merged_primary_tree_flows(controller)
   
     # GROUP_REUSE=0,GROUP=1,SINGLE=2,SINGLE_REUSE=3,MCAST_DST_ADDR=4,HOST_DST_ADDR=5) 
@@ -514,7 +514,7 @@ def test_backups_h6s9():
                     }
   check_correct_flow_actions(expected_actions, test_name)
   
-  multicast.compute_backup_trees(controller)
+  multicast.compute_hard_coded_backup_trees(controller)
   
   
   set_values = [7,8,10]
@@ -588,7 +588,7 @@ def test_merger_treeid_h6s12():
   controller.adjacency = h6s12_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16,17,18]
   
-  #multicast.compute_primary_trees(controller)
+  #multicast.compute_hard_coded_primary_trees(controller)
   
   edges1 = [(1,7),(7,18),(18,13),(13,16),(13,14),(14,17),(16,11),(11,3),(17,15),(17,12),(12,4),(15,6)]
   mcast_addr1 = IPAddr("10.10.10.10")
@@ -609,7 +609,7 @@ def test_merger_treeid_h6s12():
   
  # controller.mcast_groups[mcast_addr5] = [root5]+terminal_hosts5
   
-  #multicast.compute_primary_trees(controller)
+  #multicast.compute_hard_coded_primary_trees(controller)
   
   
   expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:2,16:0,17:1}
@@ -625,7 +625,7 @@ def test_merger_treeid_h6s12():
   backup_tree = BackupTree(**data)
   tree5.backup_trees[backup_edge] = backup_tree
   
-  #multicast.compute_backup_trees(controller)
+  #multicast.compute_hard_coded_backup_trees(controller)
   
   expected_diverge_nodes = set()
   expected_diverge_nodes.add(18)
@@ -634,7 +634,7 @@ def test_merger_treeid_h6s12():
   check_diverge_nodes(expected_diverge_nodes,backup_tree.diverge_nodes,backup_edge,tree5.id,test_name)
   
   multicast.create_install_merged_primary_tree_flows(controller)
-  multicast.compute_backup_trees(controller)
+  multicast.compute_hard_coded_backup_trees(controller)
   
   check_merge_proactive_activate_msgs(test_name, backup_tree)
   
@@ -660,7 +660,7 @@ def test_baseline_treeid_h6s12():
   controller.adjacency = h6s12_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16,17,18]
   
-  #multicast.compute_primary_trees(controller)
+  #multicast.compute_hard_coded_primary_trees(controller)
   
   edges1 = [(1,7),(7,18),(18,13),(13,16),(13,14),(14,17),(16,11),(11,3),(17,15),(17,12),(12,4),(15,6)]
   mcast_addr1 = IPAddr("10.10.10.10")
@@ -681,7 +681,7 @@ def test_baseline_treeid_h6s12():
   
  # controller.mcast_groups[mcast_addr5] = [root5]+terminal_hosts5
   
-  #multicast.compute_primary_trees(controller)
+  #multicast.compute_hard_coded_primary_trees(controller)
   expected_num_flows = {7:3,8:2,9:2,10:1,11:1,12:3,13:1,14:1,15:2,16:0,17:1}
   
   test_name = "test_baseline_treeid_h6s12()"
@@ -695,7 +695,7 @@ def test_baseline_treeid_h6s12():
   backup_tree = BackupTree(**data)
   tree5.backup_trees[backup_edge] = backup_tree
 
-  #multicast.compute_backup_trees(controller)
+  #multicast.compute_hard_coded_backup_trees(controller)
   
   expected_diverge_nodes = set()
   expected_diverge_nodes.add(18)
@@ -735,7 +735,7 @@ def test_backups_h6s11():
   controller.adjacency = h6s11_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16,17]
   
-  #multicast.compute_primary_trees(controller)
+  #multicast.compute_hard_coded_primary_trees(controller)
   
   edges1 = [(1,7),(7,8),(8,9),(8,10),(10,11),(10,12),(9,2),(11,3),(12,4)]
   mcast_addr1 = IPAddr("10.10.10.10")
@@ -819,7 +819,7 @@ def test_backups_h6s11():
   backup_tree = BackupTree(**data)
   tree5.backup_trees[backup_edge] = backup_tree
 
-  multicast.compute_backup_trees(controller)
+  multicast.compute_hard_coded_backup_trees(controller)
   
   set_values = [7,8,10,9]
   expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
@@ -898,7 +898,7 @@ def test_backups_h6s9_3trees():
   controller.adjacency = h6s9_adjancency
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15]
   
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
 
   
   edges = [(2,9), (9,8), (8,7), (7,13), (13,14), (14,12), (14,11), (11,3), (12,4), (12,15), (15,6)]
@@ -943,7 +943,7 @@ def test_backups_h6s9_3trees():
                     }
   check_correct_flow_actions(expected_actions, test_name)  
 
-  multicast.compute_backup_trees(controller)
+  multicast.compute_hard_coded_backup_trees(controller)
   
   set_values = [7,8,10]
   expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
@@ -1017,7 +1017,7 @@ def test_h6s10():
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   multicast.create_install_merged_primary_tree_flows(controller)
   
   
@@ -1065,7 +1065,7 @@ def test_h6s10_4trees_order1():
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   
   
   edges = [(3,11),(11,10),(10,8),(10,12),(8,9),(12,4),(12,15),(9,2),(15,6)]
@@ -1123,7 +1123,7 @@ def test_h6s10_4trees_order2():
   controller.adjacency = h6s10_adjancency
 
   core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
-  multicast.compute_primary_trees(controller)
+  multicast.compute_hard_coded_primary_trees(controller)
   
   edges = [(3,11),(11,10),(10,8),(10,12),(8,9),(12,4),(12,15),(9,2),(15,6)]
   mcast_addr = IPAddr("10.13.13.13")
