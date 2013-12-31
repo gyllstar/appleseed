@@ -38,3 +38,5 @@ ext/topos/topology_generator-depracted.py
 /ext/results/plot_dtime.py
 /ext/results/plot_bernoulli.py
 /ext/results/gen_loss_results.py
+
+/ext/results/final-figs/
