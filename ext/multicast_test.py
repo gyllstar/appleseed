@@ -448,7 +448,6 @@ def test_single_steiner_primary_tree_merged():
   controller = appleseed.fault_tolerant_controller()
   controller.algorithm_mode = multicast.Mode.MERGER
   controller.adjacency = adjacency
-  mcast_group = [multicast.h1,multicast.h3,multicast.h4,multicast.h6 ]
   mcast_group = [multicast.h2,IPAddr("10.0.0.14"),IPAddr("10.0.0.15"),IPAddr("10.0.0.16"),IPAddr("10.0.0.17"),IPAddr("10.0.0.18")]
   controller.mcast_groups[multicast.mcast_ip_addr1] = mcast_group #multicast address -> [src,dest1,dest2,...]
   # NICK: replace this with the switch ids
