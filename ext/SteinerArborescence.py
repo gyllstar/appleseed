@@ -1,6 +1,9 @@
 #from sympy.utilities.iterables import permutations, multiset_partitions, partitions
 import networkx as nx
+import multicast
 #import pydot as pydot
+from pox.core import core
+log = core.getLogger("steiner_arboresence")
 
 class SteinerArborescence (object):
 
@@ -14,9 +17,10 @@ class SteinerArborescence (object):
         Network = nx.DiGraph()
         for e in adjacency_list.keys():
             Network.add_edge(e[0],e[1])
-        return self.compute_steiner_arborescence(Network,root,terminals)
+        digraph = self.compute_steiner_arborescence(Network,root,terminals)
+        return digraph.edges()
         
-    def compute_backup_tree(self,adjacency_list,root,terminals,primary_tree_edges,backup_edge):
+    def compute_backup_tree(self,adjacency_list,root,terminals,primary_tree_edges,backup_edge,verbose=False):
         # Initialize Network object from adj list
         Network = nx.DiGraph()
         for e in adjacency_list.keys():
@@ -27,14 +31,14 @@ class SteinerArborescence (object):
         for e in primary_tree_edges: # Assuming tuples (keys) u,d from a dict of ({u,d}:p)
             primary_tree.add_edge(e[0],e[1])
         
-        print "Removing",backup_edge[0],backup_edge[1]
+        if verbose: print "Removing",backup_edge[0],backup_edge[1]
         if(backup_edge[1] in terminals and nx.has_path(Network,root,backup_edge[1]) or backup_edge[1] not in terminals):
             Network_with_Primary_Tree_Edges_Zeroed = self.primary_tree_weights_to_zero(Network,primary_tree,backup_edge)
-            print "Set all primary tree edges to 0, excluding the backup_edge",backup_edge
+            if verbose: print "Set all primary tree edges to 0, excluding the backup_edge",backup_edge
 
             backup_tree = self.compute_steiner_arborescence(Network_with_Primary_Tree_Edges_Zeroed,root,terminals)
-            print "Computed back-up tree for a 'down' link",backup_edge
-            print "Backup Tree",backup_edge,":",backup_tree.edges(),"\n"
+            if verbose: print "Computed back-up tree for a 'down' link",backup_edge
+            if verbose: print "Backup Tree",backup_edge,":",backup_tree.edges(),"\n"
             
         else:
             print "Stopping. The backup tree for 'down' link",backup_edge,"can't be connected to all terminals."
@@ -43,7 +47,6 @@ class SteinerArborescence (object):
         return backup_tree.edges() # Return adjacency list
 
     def compute_steiner_arborescence(self,Network,root,terminal_set,verbose=False):
-  
         def get_optimal_v_node():
             
             """
@@ -88,8 +91,25 @@ class SteinerArborescence (object):
             del cost[root] #Delete the root so that we don't consider the root-to-root path.
             for node in terminal_set:
                 del cost[node] #Don't consider any of the terminals for consideration as a v-node.
+            
+            # DPG additions
+            for node in nx.nodes_iter(Network):   #remove any other hosts from consideration
+                if not multicast.is_switch(node) and cost.has_key(node):
+                  print 'DPG Debug: removing id=%s node because its a host' %(node)
+                  del cost[node]
+#            for neigh_node in Network.adj[root].keys():
+#                if cost.has_key(neigh_node):
+#                    del cost[neigh_node]
+                  
             for node in nx.nodes_iter(Network):
-                if node not in terminal_set and node is not root:
+                is_not_terminal = node not in terminal_set
+                is_not_root = node is not root
+                is_switch = multicast.is_switch(node)
+                is_not_root_neigh = not Network.adj[root].has_key(node)
+                
+                #print 'before: r=%s,node=%s,term=%s \t\t N%s properities: is_not_term=%s,is_not_root=%s,is_switch=%s,is_not_neigh=%s' %(root,node,terminal_set,node,is_not_terminal,is_not_root,is_switch,is_not_root_neigh)
+                if is_not_terminal and is_not_root and is_switch: # and is_not_root_neigh: 
+                    #print 'after: r=%s,node=%s' %(root,node)
                     if(verbose):
                         print "v = " + node
                     distance_from_root = cost[node]
@@ -126,12 +146,13 @@ class SteinerArborescence (object):
         edgelist_from_path = compute_edgelist_from_path(path_from_root_to_v)
         SteinerTree.add_edges_from(edgelist_from_path)
         for t in terminal_set:
+            log.debug('tree_id=%s,v=%s,dst=%s' %(root,optimal_v_node,t))
             path_from_v_to_t = nx.shortest_path(Network)[optimal_v_node][t]
             edgelist_from_path = compute_edgelist_from_path(path_from_v_to_t)
             SteinerTree.add_edges_from(edgelist_from_path)
         return SteinerTree
         
-    def primary_tree_weights_to_zero(self,Network,Primary_Tree,backup_edge_to_exclude):
+    def primary_tree_weights_to_zero(self,Network,Primary_Tree,backup_edge_to_exclude,verbose=False):
         """
         Input: A Network and a Primary Tree
         Output: A new Network with the Primary Tree edges set to 0
@@ -146,7 +167,7 @@ class SteinerArborescence (object):
             if(e != backup_edge_to_exclude):
                 Network.add_edge(e[0],e[1],weight=weight)
             else:
-                print "skipping",backup_edge_to_exclude
+                if verbose: print "skipping",backup_edge_to_exclude
         return Network
         
     def kbin(self,l, k, ordered=True):
@@ -288,10 +309,10 @@ def main():
     terminals_nums = [15,16,14,17,18]
 
     """Find all combinations of terminals to put in k bins"""
-    bunched_terminals = []
-    k = 1
-    for l in SteinerArb.kbin(terminals,k,ordered=False):
-        bunched_terminals.append(l)
+    #bunched_terminals = []
+    #k = 1
+    #for l in SteinerArb.kbin(terminals,k,ordered=False):
+    #    bunched_terminals.append(l)
         # i += 1
         
     """Remove each edge and compute a backup tree, then put it back"""

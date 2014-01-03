@@ -21,6 +21,7 @@ import appleseed
 import pcount_all
 import time
 log = core.getLogger("multicast")
+import SteinerArborescence
 from SteinerArborescence import SteinerArborescence
 import networkx as nx
 
@@ -71,7 +72,9 @@ garbage_collection_total = 0
 nodes = {} # node_id --> Node
 edges = {} #(u,d) --> Edge
 default_ustar_backup_flow_priority= of.OFP_DEFAULT_PRIORITY + 1
-new_tags = [EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("66:66:66:66:66:37"),EthAddr("66:66:66:66:66:36"),EthAddr("66:66:66:66:66:35"),EthAddr("66:66:66:66:66:34"),
+new_tags = [EthAddr("66:66:66:66:66:51"),EthAddr("66:66:66:66:66:50"),EthAddr("66:66:66:66:66:49"),EthAddr("66:66:66:66:66:48"),EthAddr("66:66:66:66:66:47"),EthAddr("66:66:66:66:66:46"),
+            EthAddr("66:66:66:66:66:45"),EthAddr("66:66:66:66:66:44"),EthAddr("66:66:66:66:66:43"),EthAddr("66:66:66:66:66:42"),EthAddr("66:66:66:66:66:41"),EthAddr("66:66:66:66:66:40"),
+            EthAddr("66:66:66:66:66:39"),EthAddr("66:66:66:66:66:38"),EthAddr("66:66:66:66:66:37"),EthAddr("66:66:66:66:66:36"),EthAddr("66:66:66:66:66:35"),EthAddr("66:66:66:66:66:34"),
             EthAddr("66:66:66:66:66:33"),EthAddr("66:66:66:66:66:32"),EthAddr("66:66:66:66:66:31"),EthAddr("66:66:66:66:66:30"),EthAddr("66:66:66:66:66:29"),EthAddr("66:66:66:66:66:28"),
             EthAddr("66:66:66:66:66:27"),EthAddr("66:66:66:66:66:26"),EthAddr("66:66:66:66:66:25"),EthAddr("66:66:66:66:66:24"),EthAddr("66:66:66:66:66:23"),EthAddr("66:66:66:66:66:22"),
             EthAddr("66:66:66:66:66:21"),EthAddr("66:66:66:66:66:20"),EthAddr("66:66:66:66:66:19"),EthAddr("66:66:66:66:66:18"),EthAddr("66:66:66:66:66:17"),EthAddr("66:66:66:66:66:16"),
@@ -291,33 +294,37 @@ def compute_primary_trees(controller):
    
     flag_to_run_nicks_code = True
     if(flag_to_run_nicks_code == True):
-     adjacency_list = controller.adjacency.keys()
+     #adjacency_list = controller.adjacency.keys()
+     adjacency_list = controller.adjacency
      root_id = find_node_id(root)
      terminal_ids = list()
      for host in terminal_hosts:
        terminal_ids.append(find_node_id(host))
      
-     # NICK: replace "compute_steiner_arboresence()" with the name of your function.  
-     edges = Steiner_Arb.compute_steiner_arboresence(adjacency_list,root_id,terminal_ids) 
+     edges = Steiner_Arb.compute_primary_tree(adjacency_list,root_id,terminal_ids) 
+                
      
      data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
      tree = PrimaryTree(**data)
      controller.primary_trees.append(tree)
-     continue
-
-    controller.primary_trees.append(tree)
+     
+def is_switch(node_id):
+  switch_ids = core.openflow_discovery._dps
+  return node_id in switch_ids
+  
 
 def get_node(node_id):
   """ Either create a new Node object or retrieve one if it already exists in nodes """
   if nodes.has_key(node_id):
     return nodes[node_id]
   
-  switch_ids = core.openflow_discovery._dps
-  min_switch_id = min(switch_ids)
-  is_host = False  
-  if node_id < min_switch_id:  # with Mininet hosts have the smallest id numbers
-    is_host = True
-  
+#  switch_ids = core.openflow_discovery._dps
+#  min_switch_id = min(switch_ids)
+#  
+#  is_host = False  
+#  if node_id < min_switch_id:  # with Mininet hosts have the smallest id numbers
+#    is_host = True
+  is_host = not is_switch(node_id)
   return Node(node_id,is_host)
   
 def mark_primary_tree_edges(controller):
@@ -425,10 +432,19 @@ def get_single_backup_tag(controller,tree_id,u_node,backup_edge,group_logic=Fals
   
       return action value, match value.  These values are different if u_node has group processing for tree_id
   """
-  rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
-  match_type = rule.match_tag.type
-  
   tree = get_tree(tree_id, controller)
+  match_type = None
+  rule = None
+  if not u_node.backup_treeid_rule_map.has_key(backup_edge) or not u_node.backup_treeid_rule_map[backup_edge].has_key(tree_id):
+    if not u_node.treeid_rule_map.has_key(tree_id):
+      return tree.default_tag,tree.default_tag    # only this backup tree is using u_node (no other primary tree nor backup tree using the node
+    rule = u_node.treeid_rule_map[tree_id]
+    match_type = rule.match_tag.type
+  else:
+    rule = u_node.backup_treeid_rule_map[backup_edge][tree_id]
+    match_type = rule.match_tag.type
+  
+ 
   
   if u_node.already_processed(backup_edge,tree_id):   # upstream forwarding using Primary Tree tag so have to match at d_node using MCAST ADDRESS
     mcast_tag = Tag(TagType.MCAST_DST_ADDR,tree.mcast_address)
@@ -772,6 +788,7 @@ def create_single_tree_tagging_indices(controller,tree,tree_id,root_node):
         elif d_node.is_host:
           action_write_terminal_host_addr(controller, tree,tree_id, u_node, d_node, u2d_link)
         else:
+#          print '(%s,%s)' %(u_node.id,d_node.id)
           tag_and_match(controller,tree_id,u_node,d_node,u2d_link)
       
   log.debug( "----------------------------------------------------------------------------\n")
@@ -826,8 +843,12 @@ def create_backup_group_single_tags(controller,u_node,d_node,btree,btree_id,u2d_
     group_forwarding = False
   
   outport = controller.adjacency[(u_node.id,d_node.id)]
-
-  if group_forwarding:
+  
+  if d_node.is_host:
+    pt_rule = u_node.treeid_rule_map[btree_id]
+    action_tag = pt_rule.outport_tags[outport]
+    write_backup_tag_upstream(bak_in_trees, u_node,action_tag,outport,u2d_link,backup_edge)
+  elif group_forwarding:
     action_tag,match_tag = get_backup_group_tag(controller,bak_in_trees,btree_id, u_node,outport,shared_bak_trees,d_node,backup_edge)
     write_backup_tag_upstream(bak_in_trees, u_node,action_tag,outport,u2d_link,backup_edge,len(bak_in_trees) != 1)
    #check_remove_stale_d_node_backup_entry(bak_in_trees,d_node,match_tag,backup_edge)
@@ -984,10 +1005,16 @@ def activate_merger_backups(controller,affected_trees,failed_link):
         node = nodes[node_id]
         if node_id in signaled_nodes or node.is_host:
           continue
-        backup_flow_entry = node.backup_treeid_rule_map[backup_tree.backup_edge][backup_tree.id]
-        if backup_flow_entry.is_placeholder: continue
-        safe_priority = find_safe_flow_priority(controller, node_id)
-        node.install_precomputed_backup_ofp_rules(controller,failed_link,safe_priority)
+        print "DPG debug: node_id = %s,B=%s" %(node_id,backup_tree.id)
+#        backup_flow_entry = node.backup_treeid_rule_map[backup_tree.backup_edge][backup_tree.id]
+#        if backup_flow_entry.is_placeholder: continue
+#        safe_priority = find_safe_flow_priority(controller, node_id)
+#        node.install_precomputed_backup_ofp_rules(controller,failed_link,safe_priority)
+#        signaled_nodes.add(node_id)
+        for backup_flow_entry in node.backup_flow_entries[backup_tree.backup_edge]:
+          if backup_flow_entry.is_placeholder: continue
+          safe_priority = find_safe_flow_priority(controller, node_id)
+          node.install_precomputed_backup_ofp_rules(controller,failed_link,safe_priority)
         signaled_nodes.add(node_id)
         
   garbage_collect_merger_rules(failed_link,affected_trees)
@@ -1385,16 +1412,21 @@ def compute_edge_backup_trees(controller, backup_edge):
     controller -- appleseed.fault_tolerant_controller isntance
     backup_edge -- tuple (u,d) where u is the node_id (int) of the upstream node and d is the node id of the downstream node
   """
-  
+  Steiner_Arb = SteinerArborescence()
   # (1) what primary trees use backup_edge
   relevant_trees = find_affected_primary_trees(controller.primary_trees,backup_edge)
   # (2) for each relevant primary tree, make a call to compute the backup tree
   for primary_tree in relevant_trees:
     # this assumes we are returned a list of edges, (where each edge is a tuple)
-    backup_tree_edges = nicks_steiner_arboresence(controller.adjacency.keys(),primary_tree,backup_edge) # primary_tree is PrimaryTree objectect
+                              #compute_backup_tree(self,adjacency_list,root,terminals,primary_tree_edges,backup_edge):
+    root_id = find_node_id(primary_tree.root_ip_address)
+    terminal_ids = primary_tree.get_terminal_node_ids()
+    backup_tree_edges = Steiner_Arb.compute_backup_tree(controller.adjacency,root_id,terminal_ids,primary_tree.edges,backup_edge)
+         
     data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
     backup_tree = BackupTree(**data)
     primary_tree.backup_trees[backup_edge] = backup_tree
+    
     if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
       backup_tree.preinstall_baseline_backups()
   if controller.algorithm_mode == Mode.MERGER:    
@@ -1564,7 +1596,13 @@ class MulticastTree ():
       self.id = find_node_id(self.root_ip_address)
     #self.default_tag = Tag(TagType.SINGLE, tree_default_tags[self.id])
     self.default_tag = Tag(TagType.SINGLE, get_tree_default_tag(self.id))
-    
+  
+  def get_terminal_node_ids(self):
+    terminal_ids = []
+    for term in self.terminal_ip_addresses:
+      terminal_ids.append(find_node_id(term))
+    return terminal_ids
+  
   def find_ip_address(self,id):
     
     for ip in self.terminal_ip_addresses:
@@ -1810,7 +1848,8 @@ class BackupTree (MulticastTree):
        
     self.nodes_to_signal = self.sort_nodes_bottom_up(signal_nodes)
     
-
+    #print "DPG debugging: exiting compute_nodes_to_signal early to see what happens ..."
+    #return
     if self.controller.algorithm_mode == Mode.MERGER:
       # add the parent node of most upstream node, if the parent is not a host (EDIT: adding parent even if its a host)
       most_upstream = self.nodes_to_signal[-1]
@@ -2345,7 +2384,6 @@ class Node ():
       self.backup_flow_entries[backup_edge].remove(backup_flow_entry)
     else:
       write_bid_flow_entry.outport_tags = pt_flow_entry.outport_tags
-    
     self.add_backup_flow_entry(backup_edge, write_bid_flow_entry)
     self.add_backup_treeid_rule(backup_edge, btree.id, write_bid_flow_entry)
     

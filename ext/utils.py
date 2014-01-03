@@ -28,7 +28,7 @@ from pox.lib.packet.ethernet import ethernet
 import multicast,appleseed
 import csv,time,os
 
-
+read_mcast_group_file = True
 
 def get_ofp_rule_str(rule):
   """ Create and return a string with ofp_rule match and actions"""
@@ -101,6 +101,9 @@ def read_mtree_file(controller):
   
   TODO: the location of the file is hard-coded and should be read for the command line, or improved in some way
     """
+  if not read_mcast_group_file:
+    return
+    
   mtree_file = "ext/topos/mtree/%s" %(multicast.mtree_file_str)
   
   # check if we need to load the mtree file

@@ -8,7 +8,7 @@ To run this test run "pox.py --no-cli multicast_test"
 """
 
 
-import appleseed,multicast
+import appleseed,multicast,utils
 from multicast import BackupTree
 from multicast import TagType
 from pox.lib.addresses import IPAddr,EthAddr
@@ -377,7 +377,352 @@ def test_steiner_arboresence():
 
 
   # NICK: let me know when you are ready to test backup trees and I can add the boierplate test code for you.
+ 
+def test_single_steiner_primary_tree():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_single_steiner_primary_tree() ****"
+  setup()
   
+  adjacency = {(1,2): 2,(2,3): 2,(4,5): 2,(1,4): 2,(1,5): 2,
+                    (4,8): 2,(8,14): 2,(5,9): 2,(4,9): 2,(9,8): 2,
+                    (9,10): 2,(10,5): 2,(5,2): 2,(2,6): 2,(6,10): 2,
+                    (10,16): 2,(10,11): 2,(11,6): 2,(6,3): 2,(6,7): 2,
+                    (7,13): 2,(11,13): 2,(13,18): 2,(11,18): 2,(11,17): 2,
+                    (3,2): 2,(5,4): 2,(4,1): 2,(5,1): 2,(8,4): 2,
+                    (9,5): 2,(9,15): 2,(9,4): 2,(10,9): 2,(5,10): 2,
+                    (2,5): 2,(6,2): 2,(10,6): 2,(11,10): 2,(6,11): 2,
+                    (3,6): 2,(7,6): 2,(7,3): 2,(11,7): 2,(13,7): 2,
+                    (3,7): 2,(7,11): 2,(13,11): 2,(2,1): 2,(9,14): 2}
+  
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.BASELINE
+  controller.adjacency = adjacency
+  mcast_group = [multicast.h1,multicast.h3,multicast.h4,multicast.h6 ]
+  mcast_group = [multicast.h2,IPAddr("10.0.0.14"),IPAddr("10.0.0.15"),IPAddr("10.0.0.16"),IPAddr("10.0.0.17"),IPAddr("10.0.0.18")]
+  controller.mcast_groups[multicast.mcast_ip_addr1] = mcast_group #multicast address -> [src,dest1,dest2,...]
+  # NICK: replace this with the switch ids
+  list_of_switches = [4,5,6,7,8,9,10,11,13]
+  core.openflow_discovery._dps = list_of_switches
+  
+  
+  multicast.compute_primary_trees(controller)
+  
+  expected_edges =[(2, 5), (5, 9), (5, 10), (9, 14), (9, 15), (10, 11), (10, 16), (11, 17), (11, 18)]
+  
+  test_name = "test_single_steiner_primary_tree()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+    computed_edges.sort()
+    expected_edges.sort()
+    if computed_edges != expected_edges:
+      msg= '[ERROR] computed_edges != expected_edges: %s != %s ' %(computed_edges,expected_edges)
+      print msg
+      os._exit(0)
+  
+def test_single_steiner_primary_tree_merged():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_single_steiner_primary_tree_merged() ****"
+  setup()
+  
+  adjacency = {(1,2): 2,(2,3): 2,(4,5): 2,(1,4): 2,(1,5): 2,
+                    (4,8): 2,(8,14): 2,(5,9): 2,(4,9): 2,(9,8): 2,
+                    (9,10): 2,(10,5): 2,(5,2): 2,(2,6): 2,(6,10): 2,
+                    (10,16): 2,(10,11): 2,(11,6): 2,(6,3): 2,(6,7): 2,
+                    (7,13): 2,(11,13): 2,(13,18): 2,(11,18): 2,(11,17): 2,
+                    (3,2): 2,(5,4): 2,(4,1): 2,(5,1): 2,(8,4): 2,
+                    (9,5): 2,(9,15): 2,(9,4): 2,(10,9): 2,(5,10): 2,
+                    (2,5): 2,(6,2): 2,(10,6): 2,(11,10): 2,(6,11): 2,
+                    (3,6): 2,(7,6): 2,(7,3): 2,(11,7): 2,(13,7): 2,
+                    (3,7): 2,(7,11): 2,(13,11): 2,(2,1): 2,(9,14): 2}
+  
+  terminals_nums = [15,16,14,17,18]
+
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.adjacency = adjacency
+  mcast_group = [multicast.h1,multicast.h3,multicast.h4,multicast.h6 ]
+  mcast_group = [multicast.h2,IPAddr("10.0.0.14"),IPAddr("10.0.0.15"),IPAddr("10.0.0.16"),IPAddr("10.0.0.17"),IPAddr("10.0.0.18")]
+  controller.mcast_groups[multicast.mcast_ip_addr1] = mcast_group #multicast address -> [src,dest1,dest2,...]
+  # NICK: replace this with the switch ids
+  list_of_switches = [4,5,6,7,8,9,10,11,13]
+  core.openflow_discovery._dps = list_of_switches
+  
+  
+  multicast.compute_primary_trees(controller)
+  expected_edges =[(2, 5), (5, 9), (5, 10), (9, 14), (9, 15), (10, 11), (10, 16), (11, 17), (11, 18)]   
+  
+  test_name = "test_single_steiner_primary_tree_merged()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+    computed_edges.sort()
+    expected_edges.sort()
+    if computed_edges != expected_edges:
+      msg= '[ERROR] computed_edges != expected_edges: %s != %s ' %(computed_edges,expected_edges)
+      print msg
+      os._exit(0)
+    
+  
+  multicast.create_install_merged_primary_tree_flows(controller)
+  
+  expected_num_flows = {5:1,6:0,7:0,8:0,9:1,10:1,11:1,13:0}
+  
+  check_correct_num_flows(expected_num_flows, test_name)
+
+def test_mult_steiner_primary_tree_merged():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_mult_steiner_primary_tree_merged() ****"
+  setup()
+  
+  adjacency = {(1,2): 2,(2,3): 2,(4,5): 2,(1,4): 1,(1,5): 3,
+                    (4,8): 1,(8,14): 1,(5,9): 1,(4,9): 2,(9,8): 1,
+                    (9,10): 2,(10,5): 4,(5,2): 2,(2,6): 2,(6,10): 2,
+                    (10,15): 1 ,  (10,16): 2,(10,11): 3,(11,6): 1,(6,3): 2,(6,7): 2,
+                    (7,13): 2,(11,13): 2,(13,18): 2,(11,18):3,(11,17): 4,
+                    (3,2): 3,(5,4): 1,(4,1): 2,(5,1): 2,(8,4): 1,
+                    (9,5): 2,(9,15): 1,(9,4): 3,(10,9): 5,(5,10): 3,
+                    (2,5): 2,(6,2): 2,(10,6): 6,(11,10): 2,(6,11): 2,
+                    (3,6): 1,(7,6): 1,(7,3): 2,(11,7): 1,(13,7): 2,
+                    (3,7): 2,(7,11): 3,(13,11): 2,(2,1): 2,(9,14): 2}
+  
+  list_of_switches = [4,5,6,7,8,9,10,11,13]
+  core.openflow_discovery._dps = list_of_switches
+
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.adjacency = adjacency
+  mcast_group = [multicast.h2,IPAddr("10.0.0.14"),IPAddr("10.0.0.15"),IPAddr("10.0.0.16"),IPAddr("10.0.0.17"),IPAddr("10.0.0.18")]
+  controller.mcast_groups[multicast.mcast_ip_addr1] = mcast_group #multicast address -> [src,dest1,dest2,...]
+  
+  mcast_group2 = [multicast.h1,IPAddr("10.0.0.14"),IPAddr("10.0.0.16"),IPAddr("10.0.0.17"),IPAddr("10.0.0.18")]
+  controller.mcast_groups[multicast.mcast_ip_addr2] = mcast_group2 #multicast address -> [src,dest1,dest2,...]
+  
+  multicast.compute_primary_trees(controller)
+  #expected_edges = [(2, 5), (5, 9), (5, 10), (9, 14), (9, 15), (10, 16), (10, 11), (11, 17), (11, 18)]
+                # 2 [(2, 5), (5, 10), (9, 14), (10, 16), (10, 9), (10, 11), (10, 15), (11, 17), (11, 18)]
+                #[(1, 5), (5, 10), (9, 14), (10, 16), (10, 9), (10, 11), (11, 17), (11, 18)]
+
+  test_name = "test_mult_steiner_primary_tree_merged()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+    print pt.id, computed_edges
+#    computed_edges.sort()
+#    expected_edges.sort()
+#    if computed_edges != expected_edges:
+#      msg= '[ERROR] computed_edges != expected_edges: %s != %s ' %(computed_edges,expected_edges)
+#      print msg
+#      os._exit(0)
+    
+  
+  multicast.create_install_merged_primary_tree_flows(controller)
+                  #2 [(2, 6), (6, 10), (6, 11), (9, 14), (10, 16), (10, 9), (10, 15), (11, 17), (11, 18)]
+                #1 [(1, 5), (5, 9), (5, 10), (9, 14), (10, 16), (10, 11), (11, 17), (11, 18)]
+  expected_num_flows = {4:0,5:1,6:1,7:0,8:0,9:2,10:2,11:2,13:0}
+  
+  check_correct_num_flows(expected_num_flows, test_name)
+  
+def test_h6s9_steiners():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_h6s9_steiners() ****"
+  setup()
+  
+  adjacency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, 
+                     (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 
+                     3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4,(2,9):1,(3,11):1,(4,12):1,(6,15):1,(1,7):1,(5,7):1}
+  
+  list_of_switches = [7,8,9,10,11,12,13,14,15]
+  core.openflow_discovery._dps = list_of_switches
+
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.adjacency = adjacency
+  
+  mcast_group = [multicast.h1,IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.10.10.10")] = mcast_group 
+  
+  mcast_group2 = [multicast.h5,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.11.11.11")] = mcast_group2 
+
+  mcast_group3 = [multicast.h3,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.5"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.12.12.12")] = mcast_group3 
+  
+  mcast_group4 = [multicast.h2,IPAddr("10.0.0.1"),IPAddr("10.0.0.5"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.13.13.13")] = mcast_group4 
+  
+  mcast_group5 = [multicast.h6,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5")]
+  controller.mcast_groups[IPAddr("10.14.14.14")] = mcast_group5   
+  
+  multicast.compute_primary_trees(controller)
+  
+  test_name = "test_h6s9_steiners()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+    print pt.id, computed_edges
+#    computed_edges.sort()
+#    expected_edges.sort()
+#    if computed_edges != expected_edges:
+#      msg= '[ERROR] computed_edges != expected_edges: %s != %s ' %(computed_edges,expected_edges)
+#      print msg
+#      os._exit(0)
+    
+  
+  multicast.create_install_merged_primary_tree_flows(controller)
+  
+  expected_num_flows = {7:3,8:3,9:2,10:3,11:2,12:2,13:0,14:0,15:2}
+ 
+  check_correct_num_flows(expected_num_flows, test_name)
+
+
+  # NICK: let me know when you are ready to test backup trees and I can add the boierplate test code for you.
+def test_h6s9_steiner_backups():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_h6s9_steiner_backups() ****"
+  setup()
+  
+  adjacency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, 
+                     (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 
+                     3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4,(2,9):1,(3,11):1,(4,12):1,(6,15):1,(1,7):1,(5,7):1}
+  
+  list_of_switches = [7,8,9,10,11,12,13,14,15]
+  core.openflow_discovery._dps = list_of_switches
+
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.backup_tree_mode = multicast.BackupMode.PROACTIVE
+  #controller.backup_tree_mode = multicast.BackupMode.REACTIVE
+  controller.adjacency = adjacency
+  
+  mcast_group = [multicast.h1,IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.10.10.10")] = mcast_group 
+  
+  mcast_group2 = [multicast.h5,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.11.11.11")] = mcast_group2 
+
+  mcast_group3 = [multicast.h3,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.5"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.12.12.12")] = mcast_group3 
+  
+  
+  mcast_group5 = [multicast.h6,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5")]
+  controller.mcast_groups[IPAddr("10.14.14.14")] = mcast_group5   
+  
+  mcast_group4 = [multicast.h2,IPAddr("10.0.0.1"),IPAddr("10.0.0.5"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.13.13.13")] = mcast_group4 
+  
+  multicast.compute_primary_trees(controller)
+  
+  test_name = "test_h6s9_steiner_backups()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+  
+  multicast.create_install_merged_primary_tree_flows(controller)
+  
+  expected_num_flows = {7:3,8:3,9:2,10:3,11:2,12:2,13:0,14:0,15:2}
+  
+  check_correct_num_flows(expected_num_flows, test_name)
+  
+  failed_link = (8,10)
+  multicast.compute_edge_backup_trees(controller,failed_link)
+
+  expected_num_backup_flows = {7:3,8:2,9:2,10:0,11:1,12:1,13:1,14:1,15:0}    
+
+  expected_placeholder_backup_flows = {7:0,8:0,9:1,10:0,11:1,12:1,13:0,14:0,15:0} 
+     
+  expected_proactive_preinstall_ofp_flows = {13:1,14:1,7:1,8:2,9:0,10:0,11:0,12:0,15:0}
+  expected_proactive_activate_ofp_flows = {7:2,8:0,9:1,10:0,11:0,12:0,13:0,14:0,15:0}
+  
+  
+  check_correct_num_backup_flows(expected_num_backup_flows, failed_link, test_name)
+  check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, failed_link, test_name)
+  controller.activate_backup_trees(failed_link)
+  check_correct_proactive_ofp_flows(expected_proactive_preinstall_ofp_flows, expected_proactive_activate_ofp_flows, failed_link, test_name)
+
+
+def test_h6s9_steiner_reactive_backups():
+  """ NICK: here the starter code for your multicast test. """
+  print "**** RUNNING test_h6s9_steiner_reactive_backups() ****"
+  setup()
+  
+  adjacency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, 
+                     (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 
+                     3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4,(2,9):1,(3,11):1,(4,12):1,(6,15):1,(1,7):1,(5,7):1}
+  
+  list_of_switches = [7,8,9,10,11,12,13,14,15]
+  core.openflow_discovery._dps = list_of_switches
+
+  multicast.mtree_file_str="mtree-h6s9-2t.csv"
+  multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  controller.algorithm_mode = multicast.Mode.MERGER
+  controller.backup_tree_mode = multicast.BackupMode.REACTIVE
+  controller.adjacency = adjacency
+  
+  mcast_group = [multicast.h1,IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.10.10.10")] = mcast_group 
+  
+  mcast_group2 = [multicast.h5,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.11.11.11")] = mcast_group2 
+
+  mcast_group3 = [multicast.h3,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.5"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.12.12.12")] = mcast_group3 
+  
+  
+  mcast_group5 = [multicast.h6,IPAddr("10.0.0.1"),IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.5")]
+  controller.mcast_groups[IPAddr("10.14.14.14")] = mcast_group5   
+  
+  mcast_group4 = [multicast.h2,IPAddr("10.0.0.1"),IPAddr("10.0.0.5"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4"),IPAddr("10.0.0.6")]
+  controller.mcast_groups[IPAddr("10.13.13.13")] = mcast_group4 
+  
+  multicast.compute_primary_trees(controller)
+  
+  test_name = "test_h6s9_steiner_reactive_backups()"
+  for pt in controller.primary_trees:
+    computed_edges = pt.edges
+  
+  multicast.create_install_merged_primary_tree_flows(controller)
+  
+  expected_num_flows = {7:3,8:3,9:2,10:3,11:2,12:2,13:0,14:0,15:2}
+  
+  check_correct_num_flows(expected_num_flows, test_name)
+  
+  failed_link = (8,10)
+  multicast.compute_edge_backup_trees(controller,failed_link)
+
+  expected_num_backup_flows = {7:3,8:2,9:1,10:0,11:1,12:1,13:1,14:1,15:0}    
+  expected_placeholder_backup_flows = {7:0,8:0,9:1,10:0,11:1,12:1,13:0,14:0,15:0} 
+  expected_reactive_ofp_flows = {13:1,14:1,7:3,8:2,9:0,10:0,11:0,12:0,15:0}
+#    expected_proactive_preinstall_ofp_flows = {13:1,14:1,7:1,8:2,9:0,10:0,11:0,12:0,15:0}
+#  expected_proactive_activate_ofp_flows = {7:2,8:0,9:1,10:0,11:0,12:0,13:0,14:0,15:0}
+  
+  check_correct_num_backup_flows(expected_num_backup_flows, failed_link, test_name)
+  check_correct_num_placeholder_backup_flows(expected_placeholder_backup_flows, failed_link, test_name)
+  controller.activate_backup_trees(failed_link)
+  check_correct_reactive_ofp_flows(expected_reactive_ofp_flows, failed_link, test_name)
+
+  #os._exit(0)
+
+  # NICK: let me know when you are ready to test backup trees and I can add the boierplate test code for you.
+
 
 def test_reactive_backups_h6s9():
   print "**** RUNNING MERGER_TEST.test_reactive_backups_h6s9() ****"
@@ -482,6 +827,7 @@ def test_backups_h6s9():
   h6s9_adjancency = {(10, 11): 2, (9, 8): 2, (14, 13): 1, (10, 12): 3, (8, 9): 2, (13, 14): 3, (11, 14): 1, (15, 12): 1, (10, 8): 1, (11, 10): 2, (8, 10): 3, (13, 7): 1, (12, 10): 2, (12, 14): 1, (7, 1): 1, (7, 5): 2, (8, 7): 1, (14, 11): 3, (9, 13): 1, (12, 15): 3, (9, 2): 3, (7, 13): 3, (11, 3): 3, (14, 12): 2, (15, 6): 2, (12, 4): 4, (13, 9): 2, (7, 8): 4}
   multicast.mtree_file_str="mtree-h6s9-2t.csv"
   multicast.measure_pnts_file_str="measure-h6s9-1d-1p.csv"
+  utils.read_mcast_group_file= True
   controller = appleseed.fault_tolerant_controller()
   controller.algorithm_mode = multicast.Mode.MERGER
   controller.backup_tree_mode = multicast.BackupMode.PROACTIVE
@@ -1165,100 +1511,7 @@ def test_h6s10_4trees_order2():
   check_correct_flow_actions(expected_actions, test_name)
 
 
-def baseline_check_nodes_to_signal(expected_result,actual_result,tree_id,backup_edge,test_name):
-
-  if expected_result != actual_result:
-    msg = "\n [TEST-ERROR] %s, Backup tree (B%s) for l=%s: should have nodes-to-signal = %s but has nodes-to-signal = %s.  Exiting test. "  %(test_name,tree_id,backup_edge,expected_result,actual_result)
-    os.exit(0)
     
-def depracated_test_baseline_bottom_up_signal_simple_path():
-  """ Test no longer works because need port mappings in the adjacency matrix to compute these nodes. """
-  setup()
-  controller = appleseed.fault_tolerant_controller()
-  #controller.adjacency = h6s10_adjancency
-  controller.algorithm_mode = multicast.Mode.BASELINE
-
-  #core.openflow_discovery._dps = [7,8,9,10,11,12,13,14,15,16]
-
-  # just a simple path
-  primary_edges = [(1,2),(2,3),(3,4),(4,5),(5,6)]
-  backup_edges = [(1,2),(2,7),(7,8),(8,5),(5,6)]
-
-  
-  root = IPAddr("10.0.0.1")
-  terminals = [IPAddr("10.0.0.6")]
-  data = {"edges":primary_edges,"mcast_address":IPAddr("10.0.0.6"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
-  primary = multicast.PrimaryTree(**data)
-  
-  
-  print "before backup"
-  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(2,3),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
-  backup = multicast.BackupTree(**data)
-  print "after backup"
-  
-  primary.backup_trees[(2,3)] = backup
-
-  expected_result = [8,7,2]
-  
-  test_name = "test_baseline_bottom_up_signal_simple_path()"
-  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (2,3), test_name)
-
-def depracated_test_baseline_bottom_up_signal_trees1():
-  """ Test no longer works because need port mappings in the adjacency matrix to compute these nodes. """
-  setup()
-  controller = appleseed.fault_tolerant_controller()
-  controller.algorithm_mode = multicast.Mode.BASELINE
-  
-  # just a simple path
-  primary_edges =  [(1,5),(5,6),(6,7),(6,8),(8,9),(8,10),(7,2),(9,3),(10,4)]
-  backup_edges = [(1,5),(5,11),(11,12),(11,7),(7,2),(12,10),(12,9),(10,4),(9,3)]
-
-  
-  root = IPAddr("10.0.0.1")
-  terminals = [IPAddr("10.0.0.2"),IPAddr("10.0.0.3"),IPAddr("10.0.0.4")]
-  data = {"edges":primary_edges,"mcast_address":IPAddr("10.10.10.10"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
-  primary = multicast.PrimaryTree(**data)
-  
-
-  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
-  backup = multicast.BackupTree(**data)
-  
-  primary.backup_trees[(1,2)] = backup
-
-  #result = backup.compute_nodes_to_signal((2,3))
-  
-  expected_result = [12,11,5]
-  
-  test_name = "test_baseline_bottom_up_signal_trees1"
-  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (1,2), test_name)
-
-    
-def depracated_test_baseline_bottom_up_signal_trees2():
-  """ Test no longer works because need port mappings in the adjacency matrix to compute these nodes. """
-  setup()
-  controller = appleseed.fault_tolerant_controller()
-  controller.algorithm_mode = multicast.Mode.BASELINE
-  
-  # just a simple path
-  primary_edges = [(1,2),(2,3),(3,4),(3,5),(4,6),(5,7),(5,8)]
-  backup_edges = [(1,9),(9,10),(9,4),(10,7),(10,8),(4,6)]
-
-  
-  root = IPAddr("10.0.0.1")
-  terminals = [IPAddr("10.0.0.6"),IPAddr("10.0.0.7"),IPAddr("10.0.0.8")]
-  data = {"edges":primary_edges,"mcast_address":IPAddr("10.10.10.10"),"root":root,"terminals":terminals,"adjacency":None,"controller":controller}   
-  primary = multicast.PrimaryTree(**data)
-  
-
-  data = {"primary_tree":primary,"edges":backup_edges,"backup_edge":(1,2),"root":root,"terminals":terminals,"adjacency":None,"controller":controller,"mcast_address":IPAddr("10.0.0.7")}    
-  backup = multicast.BackupTree(**data)
-  
-  primary.backup_trees[(1,2)] = backup
-  
-  expected_result = [10,9,1]
-  
-  test_name = "test_baseline_bottom_up_signal_trees2"
-  baseline_check_nodes_to_signal(expected_result, backup.nodes_to_signal, 1, (1,2), test_name)
 
 def launch ():
   if 'openflow_discovery' not in core.components:
@@ -1269,17 +1522,19 @@ def launch ():
   core.registerNew(appleseed.fault_tolerant_controller)
   
   
-  baseline_test_names = ["test_merger_treeid_h6s12","test_baseline_treeid_h6s12()",] #"test_steiner_arboresence()"] 
-  #test_steiner_arboresence()
+  baseline_test_names = ['test_h6s9_steiner_reactive_backups()','test_h6s9_steiner_backups','test_single_steiner_primary_tree',"test_merger_treeid_h6s12","test_baseline_treeid_h6s12()","test_single_steiner_primary_tree_merged()",'test_mult_steiner_primary_tree_merged','test_h6s9_steiners()'] 
+  test_h6s9_steiner_reactive_backups()
+  test_h6s9_steiner_backups()
+  test_h6s9_steiners()
+  test_mult_steiner_primary_tree_merged()
+  test_single_steiner_primary_tree()
+  test_single_steiner_primary_tree_merged()
   test_backups_h6s9()
   test_reactive_backups_h6s9()
   test_backups_h6s9_3trees()
   
   test_merger_treeid_h6s12()
   test_baseline_treeid_h6s12()
-  #test_baseline_bottom_up_signal_simple_path()
-  #test_baseline_bottom_up_signal_trees1()
-  #test_baseline_bottom_up_signal_trees2()
   
   
   merger_test_names = ["test_backups_h6s11()\t", "test_backups_h6s9_3trees()","test_backups_h6s9()\t\t","test_reactive_backups_h6s9()", "test_h6s10()\t\t","test_h6s10_4trees_order1()","test_h6s10_4trees_order2()"]
