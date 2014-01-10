@@ -57,6 +57,9 @@ import time
 
 
 BACKUP_TREE_EXPT_FLAG = False
+global_backup_tree_mode = multicast.BackupMode.REACTIVE
+global_algorithm_mode = multicast.Mode.BASELINE
+
 INSTALL_PRIMARY_TREES_DELAY = 20  #delay of 10 seconds (from the time the first link is discovered) to install the primary trees
 INSTALL_PRIMARY_TREE_TRIGGER_IP = IPAddr("10.244.244.244")
 LINK_TIMEOUT = 1000 # time the discovery module waits before considering a link removed
@@ -137,7 +140,6 @@ class fault_tolerant_controller (EventMixin):
     
     # dict: (u,d) --> set[PCountResults], initiated when unicast flows are installed
     self.pcount_link_results = {}  
-
     
     self.num_monitor_flows = pcount_all.PCOUNT_NUM_MONITOR_FLOWS
     
@@ -324,7 +326,7 @@ class fault_tolerant_controller (EventMixin):
               multicast.install_pcount_unicast_flows(self)
               pcount_all.start_pcount(self,self.monitored_links,self.primary_trees,pcount_all.PCOUNT_NUM_MONITOR_FLOWS)
             elif BACKUP_TREE_EXPT_FLAG:
-              multicast.install_all_trees(self,True) 
+              multicast.bak_tree_expt_install_trees(self) 
             else:
               multicast.install_all_trees(self)  # NICK: here is where I make the call to compute and install all primary trees (and potentially backup trees)
               pcount_all.start_pcount(self,self.monitored_links,self.primary_trees)
@@ -450,36 +452,56 @@ class fault_tolerant_controller (EventMixin):
     self.listenTo(core.openflow)
     log.debug("Up...")
     
+    global global_backup_tree_mode
+    global global_algorithm_mode
+    global BACKUP_TREE_EXPT_FLAG
+    if BACKUP_TREE_EXPT_FLAG:
+      #print 'BEFORE: backup_tree_mode=%s, algorithm_mode = %s' %(self.backup_tree_mode,self.algorithm_mode)      
+      self.algorithm_mode = global_algorithm_mode
+      self.backup_tree_mode = global_backup_tree_mode
     
     core.openflow.addListenerByName("AggregateFlowStatsReceived", self.handle_d_node_aggregate_flow_stats)
     core.openflow.addListenerByName("FlowStatsReceived", self.handle_flow_stats)
     core.openflow.addListenerByName("FlowRemoved", self.handle_flow_removed)
-    log.debug("Listening to flow stats ...")
+    log.debug("Listening to flow stats ...") 
     
     log.debug("configuration files -- measurement points file = %s, mtree file=%s" %(multicast.measure_pnts_file_str,multicast.mtree_file_str))
 
-
-
-def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1,dtime=False,is_backup_tree_expt = False):
+def set_backup_tree_expt_parms(is_backup_tree_expt,bak_mode,opt,num_switches,num_groups):
+  global BACKUP_TREE_EXPT_FLAG 
+  if bool(is_backup_tree_expt):
+    BACKUP_TREE_EXPT_FLAG = True
+  global global_backup_tree_mode
+  global global_algorithm_mode
+  if str(bak_mode) == 'reactive':  
+    global_backup_tree_mode = multicast.BackupMode.REACTIVE
+  else:
+    global_backup_tree_mode = multicast.BackupMode.PROACTIVE
+  
+  if str(opt) == 'basic':
+    global_algorithm_mode = multicast.Mode.BASELINE
+  else:
+    global_algorithm_mode = multicast.Mode.MERGER
+    
+  multicast.backup_expt_num_switches = int(num_switches)
+  multicast.backup_expt_num_groups = int(num_groups)
+#'--bak_mode=%s' %(args.bak_mode), '--opt=%s' %(args.opt),
+def launch (num_monitor_flows=-1,num_unicast_flows=-1,true_loss_percentage=-1,dtime=False,is_backup_tree_expt = False,bak_mode='reactive',opt='basic',num_switches=-1,num_groups=-1):
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
     discovery.LINK_TIMEOUT = LINK_TIMEOUT
     core.registerNew(discovery.Discovery)
     
   if num_monitor_flows != -1:
-    #log.debug("before created ft_controller")
-    #controller = fault_tolerant_controller()
-    #controller.algorithm_mode = multicast.Mode.BASELINE
+ 
     pcount_all.PCOUNT_DTIME_EXPT = bool(dtime)
-    log.debug("PCOUNT_DTIME_EXPT=%s" %(bool(dtime)))
-    print "PCOUNT_DTIME_EXPT=%s" %(bool(dtime))
     if bool(dtime):
       num_monitor_flows = 1
     pcount_all.set_pcount_expt_params(num_monitor_flows,num_unicast_flows,true_loss_percentage,True)
     core.registerNew(fault_tolerant_controller)
+  
   else:
-    if bool(is_backup_tree_expt):
-      BACKUP_TREE_EXPT_FLAG = True
+    set_backup_tree_expt_parms(is_backup_tree_expt,bak_mode,opt,num_switches,num_groups)
     core.registerNew(fault_tolerant_controller)
   
   

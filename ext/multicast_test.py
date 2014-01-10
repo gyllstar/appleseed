@@ -527,6 +527,7 @@ def test_mult_steiner_primary_tree_merged():
   multicast.create_install_merged_primary_tree_flows(controller)
                   #2 [(2, 6), (6, 10), (6, 11), (9, 14), (10, 16), (10, 9), (10, 15), (11, 17), (11, 18)]
                 #1 [(1, 5), (5, 9), (5, 10), (9, 14), (10, 16), (10, 11), (11, 17), (11, 18)]
+  #expected_num_flows = {4:0,5:1,6:1,7:0,8:0,9:2,10:2,11:2,13:0}
   expected_num_flows = {4:0,5:1,6:1,7:0,8:0,9:2,10:2,11:2,13:0}
   
   check_correct_num_flows(expected_num_flows, test_name)
@@ -639,7 +640,8 @@ def test_h6s9_steiner_backups():
   check_correct_num_flows(expected_num_flows, test_name)
   
   failed_link = (8,10)
-  multicast.compute_edge_backup_trees(controller,failed_link)
+  multicast.compute_edge_backup_trees(controller,failed_link,is_final_proactive_call=True)
+  #multicast.compute_edge_backup_trees(controller,failed_link,True,True,[failed_link],True)
 
   expected_num_backup_flows = {7:3,8:2,9:2,10:0,11:1,12:1,13:1,14:1,15:0}    
 
@@ -1163,8 +1165,9 @@ def test_backups_h6s11():
             "adjacency":controller.adjacency, "controller":controller,"primary_tree":tree5,"backup_edge":backup_edge}
   backup_tree = BackupTree(**data)
   tree5.backup_trees[backup_edge] = backup_tree
-
+  
   multicast.compute_hard_coded_backup_trees(controller)
+
   
   set_values = [7,8,10,9]
   expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
@@ -1182,6 +1185,8 @@ def test_backups_h6s11():
   multicast.garbage_collect_merger_rules(failed_link,affected_trees)
   expected_num_garbage_flows = 4
   check_num_garbage_flows_correct(expected_num_garbage_flows,test_name)
+  
+  #multicast.record_no_mininet_results(controller,affected_trees,failed_link)
   
   # includes placeholders
   expected_num_backup_flows = {7:2,8:0,9:0,10:0,11:1,12:2,13:1,14:1,15:0,16:1,17:2}
@@ -1289,7 +1294,9 @@ def test_backups_h6s9_3trees():
   check_correct_flow_actions(expected_actions, test_name)  
 
   multicast.compute_hard_coded_backup_trees(controller)
-  
+  #multicast.compute_backup_lower_bound(controller,[(7,8)])
+  #os._exit(0)
+    
   set_values = [7,8,10]
   expected_garbage_nodes = {1:set(set_values), 5:set(set_values)}
   backup_edges = set()
@@ -1509,9 +1516,23 @@ def test_h6s10_4trees_order2():
                     }
   check_correct_flow_actions(expected_actions, test_name)
 
-
-    
-
+def test_backup_tree_expt_setup():
+  test_name = 'test_backup_tree_expt_setup()'
+  print "**** RUNNING test_backup_tree_expt_setup() ****"
+  setup()
+  
+  utils.read_mcast_group_file= False
+  
+  controller = appleseed.fault_tolerant_controller()
+  multicast.backup_expt_num_switches = 14
+  multicast.backup_expt_num_groups =3
+  multicast.bak_tree_expt_install_trees(controller)
+  
+ # controller.algorithm_mode = multicast.Mode.MERGER
+ # controller.backup_tree_mode = multicast.BackupMode.REACTIVE
+  print 'exiting after %s' %(test_name)
+  os._exit(0)
+  
 def launch ():
   if 'openflow_discovery' not in core.components:
     import pox.openflow.discovery as discovery
@@ -1520,9 +1541,12 @@ def launch ():
     
   core.registerNew(appleseed.fault_tolerant_controller)
   
+  #test_backup_tree_expt_setup()
+  
   
   baseline_test_names = ['test_h6s9_steiner_reactive_backups()','test_h6s9_steiner_backups','test_single_steiner_primary_tree',"test_merger_treeid_h6s12","test_baseline_treeid_h6s12()","test_single_steiner_primary_tree_merged()",'test_mult_steiner_primary_tree_merged','test_h6s9_steiners()'] 
   test_h6s9_steiner_reactive_backups()
+ # os._exit(0)
   test_h6s9_steiner_backups()
   test_h6s9_steiners()
   test_mult_steiner_primary_tree_merged()

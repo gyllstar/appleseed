@@ -72,6 +72,8 @@ parser = ArgumentParser(description="generates IEEE topology, creates a correspo
 
 parser.add_argument("--topo", dest="topo_num",type=int,help="IEEE topology number (i.e, 14,30,57,118) link",default=14)
 parser.add_argument("--num-groups", dest="num_groups",type=int,help="number of multicast groups",default=1)
+parser.add_argument("--bak-mode", dest="bak_mode",type=str,help="backup mode (proactive or reactive)",default='reactive')
+parser.add_argument("--opt", dest="opt",type=str,help="optimization mode (basic or merger)",default='basic')
 parser.add_argument("--log", dest="log",type=bool,help="turn logging on at controller. ",default=False)
 
 args = parser.parse_args()
@@ -87,22 +89,24 @@ if args.log:
 
 
 ieee_file_str = "%s%s%s.%s" %(ieee_graphs_folder,ieee_base_file_name,args.topo_num,ieee_file_type)
-ieee_mn_graph,mcast_groups = graph_generator.gen_graph_and_mcast_groups(ieee_file_str,num_groups=args.num_groups)
-print mcast_groups
+#ieee_mn_graph,mcast_groups = graph_generator.gen_graph_and_mcast_groups(ieee_file_str,num_groups=args.num_groups)
+ieee_mn_graph = graph_generator.gen_graph(ieee_file_str)
 
 
-setLogLevel('debug')
+#setLogLevel('debug')
 
 
 # (2) start the appleseed controller
 if args.log: print "\n starting appleseed controller as Remote Controller"
 sys.path.append('/home/mininet/appleseed')
 
-start_assed_cmd = None
+start_aseed_cmd = None
 if args.log:
-	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed','--is_backup_tree_expt=True','openflow.discovery','log', '--file=ext/results/backup_tree_expt.log,w'] 
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'appleseed','--is_backup_tree_expt=True', '--bak_mode=%s' %(args.bak_mode), '--opt=%s' %(args.opt),
+                     '--num_switches=%s' %(args.topo_num), '--num_groups=%s' %(args.num_groups), 'openflow.discovery','log', '--file=ext/results/backup_tree_expt.log,w'] 
 else:
-	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed', '--is_backup_tree_expt=True', 'openflow.discovery'] 
+	start_aseed_cmd = ['python', '/home/mininet/appleseed/pox.py', '--no-cli', 'log', '--no-default', 'appleseed', '--is_backup_tree_expt=True', '--bak_mode=%s' %(args.bak_mode),
+                      '--opt=%s' %(args.opt), '--num_switches=%s' %(args.topo_num), '--num_groups=%s' %(args.num_groups), 'openflow.discovery'] 
 
 
 os.chdir('/home/mininet/appleseed')
@@ -160,20 +164,17 @@ print "\n sleeping for %s seconds before starting cbr flows " %(wait)
 time.sleep(wait)
 
 # (4) start the cbr flows at the mcast root nodes
-rate = 60	# 60 msgs per second
-for group in mcast_groups:
-	root_id = group[0]
-	root_host = hosts[root_id -1]
-	mcast_addr = compute_mcast_addr(root_id)
-	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(root_id,mcast_addr,rate,root_id)
-	if args.log: print cmd
-	root_host.cmd(cmd)
+#rate = 60	# 60 msgs per second
+#for group in mcast_groups:
+#	root_id = group[0]
+#	root_host = hosts[root_id -1]
+#	mcast_addr = compute_mcast_addr(root_id)
+#	cmd = 'sudo python ~/cbr_flow.py %s %s %s > ~/cbr/h%s_cbr.out &' %(root_id,mcast_addr,rate,root_id)
+#	#if args.log: print cmd
+#	root_host.cmd(cmd)
 
 #CLI(net)
 
-#wait = 60
-#print "\n sleeping for %s seconds to cbr flows to start " %(wait)
-#time.sleep(wait)
 
 #raw_input("Press Enter to Exit")
 

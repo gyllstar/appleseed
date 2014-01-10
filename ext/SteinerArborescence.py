@@ -17,8 +17,10 @@ class SteinerArborescence (object):
         Network = nx.DiGraph()
         for e in adjacency_list.keys():
             Network.add_edge(e[0],e[1])
-        digraph = self.compute_steiner_arborescence(Network,root,terminals)
-        return digraph.edges()
+        digraph = self.compute_steiner_arborescence(Network,root,terminals,adjacency_list)
+        if digraph == None:
+          return False,None
+        return True,digraph.edges()
         
     def compute_backup_tree(self,adjacency_list,root,terminals,primary_tree_edges,backup_edge,verbose=False):
         # Initialize Network object from adj list
@@ -36,7 +38,10 @@ class SteinerArborescence (object):
             Network_with_Primary_Tree_Edges_Zeroed = self.primary_tree_weights_to_zero(Network,primary_tree,backup_edge)
             if verbose: print "Set all primary tree edges to 0, excluding the backup_edge",backup_edge
 
-            backup_tree = self.compute_steiner_arborescence(Network_with_Primary_Tree_Edges_Zeroed,root,terminals)
+            backup_tree = self.compute_steiner_arborescence(Network_with_Primary_Tree_Edges_Zeroed,root,terminals,adjacency_list)
+            
+            if backup_tree == None:
+              return False,None #do not have path to all terminals in backup tree
             if verbose: print "Computed back-up tree for a 'down' link",backup_edge
             if verbose: print "Backup Tree",backup_edge,":",backup_tree.edges(),"\n"
             
@@ -44,45 +49,52 @@ class SteinerArborescence (object):
             print "Stopping. The backup tree for 'down' link",backup_edge,"can't be connected to all terminals."
             return
         
-        return backup_tree.edges() # Return adjacency list
+        return True,backup_tree.edges() # Return adjacency list
 
-    def compute_steiner_arborescence(self,Network,root,terminal_set,verbose=False):
+    def nx_copy_minus_nodes(self,exclude_nodes,root,v,orig_graph):
+        #print '\t DPG: path from root to v = %s' %(exclude_nodes)
+        nx_copy = nx.DiGraph()
+        exclude_nodes.remove(root)
+        exclude_nodes.remove(v)
+        for e in orig_graph.edges(): 
+          if e[0] in exclude_nodes or e[1] in exclude_nodes:
+            if multicast.is_switch(e[0]) and multicast.is_switch(e[1]):
+              #print "\t\t DPG excluding BT%s, e=(%s,%s)" %(root,e[0],e[1])
+              continue
+          
+          nx_copy.add_edge(e[0],e[1])
+        return nx_copy
+
+    def compute_steiner_arborescence(self,Network,root,terminal_set,adjacency_list,verbose=False):
         def get_optimal_v_node():
-            
-            """
-            AVG_DENSITY( Node v, Terminal Set t[ .. ] ):
-                For each t(i) in Terminal Set:
-                    if path(v,t(i)) exists:
-                        Store the path length of the shortest such path
-                    else:
-                        exit since this bunch does not connect t(i) since it must at least connect to all terminals
-                Compute the average density by averaging the path lengths
-
-            OPTIMAL_VNODE ( Graph G, Terminal Set t[ .. ] ):
-                Starting at G.root, BFS the Graph:
-                For each node:
-                    cost[i] = AVG_DENSITY( this node, Terminal Set ) + path_length(root, this node )
-                return min(avg_density)
-            """
-            
-            cost = {}
-            
+                
             def average_density(node):
                 total_cost = 0
                 terminals_visited_yet = 0
+                path_from_root_to_candidate = nx.shortest_path(Network)[root][node]
+                
+#                if node in path_from_root_to_candidate:
+#                  return 999999
+                
+                #print 'DPG: density computation ---- about to Remove edges to each node on nx_path=%s' %(path_from_root_to_candidate)
+                nx_copy = self.nx_copy_minus_nodes(path_from_root_to_candidate,root,node, Network)
+                #edgelist_from_path = compute_edgelist_from_path(path_from_root_to_candidate)
+                
                 for t in terminal_set:
-                    if(nx.has_path(Network,node,t)):
+                    if(nx.has_path(nx_copy,node,t)):
                         if(verbose):
-                            print "Distance to",t,"=",nx.shortest_path_length(Network,source=node,target=t,weight='weight')
-                        total_cost += nx.shortest_path_length(Network,node,t)
+                            print "Distance to",t,"=",nx.shortest_path_length(nx_copy,source=node,target=t,weight='weight')
+                        total_cost += nx.shortest_path_length(nx_copy,node,t)
                         terminals_visited_yet += 1
                         if(verbose):
                             print terminals_visited_yet,"Current Average Density:",(float(total_cost)/terminals_visited_yet)
                     else:
-                        pass
+                        total_cost = 9999999
                 # Casting numerator || denominator results in a float
                 total_cost = (float(total_cost)/len(terminal_set))
                 return total_cost
+            
+            cost = {}
             
             shortest_paths = nx.shortest_path_length(Network,weight='weight')
             # cost = shortest_paths['b'] #Get the shortest paths from the root.
@@ -90,28 +102,27 @@ class SteinerArborescence (object):
             cost = shortest_paths[root] #Get the shortest paths from the root.
             del cost[root] #Delete the root so that we don't consider the root-to-root path.
             for node in terminal_set:
-                del cost[node] #Don't consider any of the terminals for consideration as a v-node.
+                if cost.has_key(node):
+                  del cost[node] #Don't consider any of the terminals for consideration as a v-node.
             
             # DPG additions
             for node in nx.nodes_iter(Network):   #remove any other hosts from consideration
                 if not multicast.is_switch(node) and cost.has_key(node):
-                  print 'DPG Debug: removing id=%s node because its a host' %(node)
+                  #print 'DPG Debug: removing id=%s node because its a host' %(node)
                   del cost[node]
-#            for neigh_node in Network.adj[root].keys():
-#                if cost.has_key(neigh_node):
-#                    del cost[neigh_node]
                   
             for node in nx.nodes_iter(Network):
                 is_not_terminal = node not in terminal_set
                 is_not_root = node is not root
                 is_switch = multicast.is_switch(node)
-                is_not_root_neigh = not Network.adj[root].has_key(node)
                 
                 #print 'before: r=%s,node=%s,term=%s \t\t N%s properities: is_not_term=%s,is_not_root=%s,is_switch=%s,is_not_neigh=%s' %(root,node,terminal_set,node,is_not_terminal,is_not_root,is_switch,is_not_root_neigh)
-                if is_not_terminal and is_not_root and is_switch: # and is_not_root_neigh: 
+                if is_not_terminal and is_not_root and is_switch:  
                     #print 'after: r=%s,node=%s' %(root,node)
                     if(verbose):
                         print "v = " + node
+                    if not cost.has_key(node):
+                      continue #no path to node so skip
                     distance_from_root = cost[node]
                     cost[node] += average_density(node)
                     if(verbose):
@@ -143,15 +154,26 @@ class SteinerArborescence (object):
         SteinerTree = nx.DiGraph()
         optimal_v_node = get_optimal_v_node()
         path_from_root_to_v = nx.shortest_path(Network)[root][optimal_v_node]
-        edgelist_from_path = compute_edgelist_from_path(path_from_root_to_v)
-        SteinerTree.add_edges_from(edgelist_from_path)
+        root2v_edges = compute_edgelist_from_path(path_from_root_to_v)
+        SteinerTree.add_edges_from(root2v_edges)
+        #print 'DPG Debug: computing path from v=%s to terminals. ' %(optimal_v_node)
+        nx_copy = self.nx_copy_minus_nodes(path_from_root_to_v,root,optimal_v_node,Network)
         for t in terminal_set:
             log.debug('tree_id=%s,v=%s,dst=%s' %(root,optimal_v_node,t))
-            path_from_v_to_t = nx.shortest_path(Network)[optimal_v_node][t]
+            
+            if not nx.shortest_path(nx_copy)[optimal_v_node].has_key(t):
+              log.debug('skipping backup tree creation because path to terminal does not exist')
+              return None
+            path_from_v_to_t = nx.shortest_path(nx_copy)[optimal_v_node][t]
             edgelist_from_path = compute_edgelist_from_path(path_from_v_to_t)
             SteinerTree.add_edges_from(edgelist_from_path)
         return SteinerTree
-        
+#        for t in terminal_set:
+#            log.debug('tree_id=%s,v=%s,dst=%s' %(root,optimal_v_node,t))
+#            path_from_v_to_t = nx.shortest_path(Network)[optimal_v_node][t]
+#            edgelist_from_path = compute_edgelist_from_path(path_from_v_to_t)
+#            SteinerTree.add_edges_from(edgelist_from_path)
+#        return SteinerTree    
     def primary_tree_weights_to_zero(self,Network,Primary_Tree,backup_edge_to_exclude,verbose=False):
         """
         Input: A Network and a Primary Tree

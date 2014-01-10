@@ -14,16 +14,18 @@ from pox.core import core
 from pox.lib.addresses import IPAddr, EthAddr
 from pox.lib.packet.ethernet import ethernet
 from types import NoneType
-import os
+import random
+import os,csv
 import pox.openflow.libopenflow_01 as of
 import utils
-import appleseed
+import appleseed,stats
 import pcount_all
-import time
+import time, copy
 log = core.getLogger("multicast")
 import SteinerArborescence
 from SteinerArborescence import SteinerArborescence
 import networkx as nx
+from collections import defaultdict
 
 
 #################### Start of Hard-coded IP addresses and config files ####################
@@ -68,9 +70,15 @@ mtree_file_str="mtree-h6s9-2t.csv"
 
 depracted_installed_mtrees=[] #list of multicast addresses with an mtree already installed
 
+global_lower_bound=0
 garbage_collection_total = 0
+backup_expt_num_switches=-1
+backup_expt_num_groups = -1 
 nodes = {} # node_id --> Node
 edges = {} #(u,d) --> Edge
+skip_cnt_no_path = 0
+total_bak_iterations=0
+new_tag_num=1
 default_ustar_backup_flow_priority= of.OFP_DEFAULT_PRIORITY + 1
 new_tags = [EthAddr("66:66:66:66:66:51"),EthAddr("66:66:66:66:66:50"),EthAddr("66:66:66:66:66:49"),EthAddr("66:66:66:66:66:48"),EthAddr("66:66:66:66:66:47"),EthAddr("66:66:66:66:66:46"),
             EthAddr("66:66:66:66:66:45"),EthAddr("66:66:66:66:66:44"),EthAddr("66:66:66:66:66:43"),EthAddr("66:66:66:66:66:42"),EthAddr("66:66:66:66:66:41"),EthAddr("66:66:66:66:66:40"),
@@ -95,6 +103,10 @@ tree_default_tags = {1:EthAddr("AA:AA:AA:AA:AA:01"),2:EthAddr("AA:AA:AA:AA:AA:02
                      19:EthAddr("AA:AA:AA:AA:AA:19"),20:EthAddr("AA:AA:AA:AA:AA:20"),21:EthAddr("AA:AA:AA:AA:AA:21"),22:EthAddr("AA:AA:AA:AA:AA:22"),23:EthAddr("AA:AA:AA:AA:AA:23"),24:EthAddr("AA:AA:AA:AA:AA:24"),
                      25:EthAddr("AA:AA:AA:AA:AA:25"),26:EthAddr("AA:AA:AA:AA:AA:26"),27:EthAddr("AA:AA:AA:AA:AA:27"),28:EthAddr("AA:AA:AA:AA:AA:28"),29:EthAddr("AA:AA:AA:AA:AA:29"),30:EthAddr("AA:AA:AA:AA:AA:30"),
                      31:EthAddr("AA:AA:AA:AA:AA:31"),32:EthAddr("AA:AA:AA:AA:AA:32"),33:EthAddr("AA:AA:AA:AA:AA:33"),34:EthAddr("AA:AA:AA:AA:AA:34"),35:EthAddr("AA:AA:AA:AA:AA:35"),36:EthAddr("AA:AA:AA:AA:AA:36"),}
+
+new_tags_copy = copy.deepcopy(new_tags)
+backup_tree_ids_copy = copy.deepcopy(backup_tree_ids)
+tree_default_tags_copy = copy.deepcopy(tree_default_tags)
 
 def enum(**enums):
     return type('Enum', (), enums)
@@ -198,22 +210,109 @@ def find_mcast_measure_points(nw_src,mcast_ip_addr1,controller):
     
   return -1,-1
 
-def generate_multicast_groups(controller,backup_tree_expt=False):
+def compute_mcast_addr(root_id):
+  """ Takes node_id and makes IP address - 10.node_id.node_id.node_id.  Example, node_id = 13 yields 10.13.13.13 """
+  mcast_addr = "10.%s.%s.%s" %(root_id,root_id,root_id)
+  return mcast_addr
+
+def gen_single_mcast_group(controller,node_ids,root_ids,mcast_groups,group_size):
+  group_created = False
+  
+  mcast_group_hosts = random.sample(node_ids,group_size)
+  random.shuffle(mcast_group_hosts)
+  for root_candidate in mcast_group_hosts:
+    if root_candidate not in root_ids:
+      root_ids.append(root_candidate)
+      mcast_group_hosts.remove(root_candidate)
+      mcast_groups.append((root_candidate,mcast_group_hosts))
+      
+      group_list_ipaddr = [find_host_ip_addr(root_candidate)]
+      for terminal in mcast_group_hosts:
+        term_ip = find_host_ip_addr(terminal)
+        group_list_ipaddr.append(term_ip)
+      mcast_addr = compute_mcast_addr(root_candidate)
+      controller.mcast_groups[mcast_addr] = group_list_ipaddr 
+      #controller.multicast address -> [src,dest1,dest2,...]
+      #controller.mcast_groups[mcast_addr] = 
+      return True
+  
+  return group_created 
+
+def gen_single_shared_mcast_group(controller,node_ids,root_ids,mcast_groups,group_size,terminal_ids=None):
+  group_created = False
+  
+  if terminal_ids == None:
+    mcast_group_hosts = random.sample(node_ids,group_size)
+    random.shuffle(mcast_group_hosts)
+    for root_candidate in mcast_group_hosts:
+      if root_candidate not in root_ids:
+        root_ids.append(root_candidate)
+        mcast_group_hosts.remove(root_candidate)
+        mcast_groups.append((root_candidate,mcast_group_hosts))
+        
+        group_list_ipaddr = [find_host_ip_addr(root_candidate)]
+        for terminal in mcast_group_hosts:
+          term_ip = find_host_ip_addr(terminal)
+          group_list_ipaddr.append(term_ip)
+        mcast_addr = compute_mcast_addr(root_candidate)
+        controller.mcast_groups[mcast_addr] = group_list_ipaddr 
+        return True,mcast_group_hosts,None  #created group, set of terminals to reuse, additional terminals
+  
+  else:
+    # reuse some of the terminal ids and find a new root
+    #while
+    
+    return group_created   
+
+def generate_shared_multicast_groups(controller):
+  """ Generated Multicast Groups that share the same set of terminals.
+  """
+  controller.mcast_groups.clear()
+  
+  first_host_id = 1
+  last_host_id = backup_expt_num_switches+1
+  
+  mcast_groups = [] #tuple(root_id, [terminal_host_ids])
+  root_ids = [] # used to make sure that we only create one multicast group rooted at any node
+  node_ids=[]
+  
+  #print 'generate_multicast_groups() host id range [%s,%s]' %(first_host_id,last_host_id)
+  for id in range(first_host_id,last_host_id): 
+    node_ids.append(id)
+  
+  curr_num_groups = 0 
+  group_size = (backup_expt_num_switches/3) + 1
+  while curr_num_groups < backup_expt_num_groups:
+    group_created = gen_single_mcast_group(controller,node_ids,root_ids,mcast_groups,group_size)
+    if group_created: curr_num_groups+=1
+
+def generate_multicast_groups(controller):
   """ Temporary solution is just use the multicast groups read from a text file (see utils.read_mtree_file).  Would like to generate multicast groups w/ a random process.
       
       Currently this a no-op as the multicast groups are already read from a text file.
   """
-  if backup_tree_expt:
-    # clear the mcast groups, read in the mcast groups from file
-    controller.mcast_groups.clear()
+  controller.mcast_groups.clear()
+  
+  first_host_id = 1
+  last_host_id = backup_expt_num_switches+1
+  
+  mcast_groups = [] #tuple(root_id, [terminal_host_ids])
+  root_ids = [] # used to make sure that we only create one multicast group rooted at any node
+  node_ids=[]
+  
+  #print 'generate_multicast_groups() host id range [%s,%s]' %(first_host_id,last_host_id)
+  for id in range(first_host_id,last_host_id): 
+    node_ids.append(id)
+  
+  curr_num_groups = 0 
+  group_size = (backup_expt_num_switches/3) + 1
+  while curr_num_groups < backup_expt_num_groups:
+    group_created = gen_single_mcast_group(controller,node_ids,root_ids,mcast_groups,group_size)
+    if group_created: curr_num_groups+=1
+  
+  #for group in controller.mcast_groups.keys():
+  #  print 'DPG debug; generated mcast groups: %s %s' %(group, controller.mcast_groups[group])
     
-    
-  # considering all end_hosts, generate some random multicast groups
-  
-  
-  # add each multicast group to controller.mcast_groups
-
-  
 def compute_hard_coded_primary_trees(controller):
   """ In the short-term the primary trees are hard-coded.  This is where the code for computing the Steiner Arboresence approximation goes. """
   num_switches = len(core.openflow_discovery._dps)
@@ -301,13 +400,16 @@ def compute_primary_trees(controller):
      for host in terminal_hosts:
        terminal_ids.append(find_node_id(host))
      
-     edges = Steiner_Arb.compute_primary_tree(adjacency_list,root_id,terminal_ids) 
-                
+     successful_computation,edges = Steiner_Arb.compute_primary_tree(adjacency_list,root_id,terminal_ids) 
+     
+     if not successful_computation:
+       return False 
      
      data = {"edges":edges, "mcast_address":mcast_addr, "root":root, "terminals":terminal_hosts, "adjacency":controller.adjacency, "controller":controller}
      tree = PrimaryTree(**data)
      controller.primary_trees.append(tree)
-     
+  return True
+
 def is_switch(node_id):
   switch_ids = core.openflow_discovery._dps
   return node_id in switch_ids
@@ -344,8 +446,87 @@ def mark_backup_tree_edges(controller):
    
 
 
+#def generate_new_tag():
+#  return new_tags.pop()
+
+def get_tree_default_tag(id):
+  
+  r4 = id/254
+  d4 = id%254
+
+  r3 = r4/254
+  d3 = r4%254
+
+  r2 = r3/254
+  d2 = r3%254
+
+  r1 = r2/254
+  d1 = r2%254
+  
+  # make in hex
+  d4 = hex(d4).rstrip("L").lstrip("0x") or "0"
+  d3 = hex(d3).rstrip("L").lstrip("0x") or "0"
+  d2 = hex(d2).rstrip("L").lstrip("0x") or "0"
+  d1 = hex(d1).rstrip("L").lstrip("0x") or "0"
+  
+  eth_add_str = 'AA:AA:%s:%s:%s:%s' %(d4,d3,d2,d1)
+  return EthAddr(eth_add_str)  
+
+def generate_next_bid(id):
+  
+  r4 = id/254
+  d4 = id%254
+
+  r3 = r4/254
+  d3 = r4%254
+
+  r2 = r3/254
+  d2 = r3%254
+
+  r1 = r2/254
+  d1 = r2%254
+  
+  # make in hex
+  d4 = hex(d4).rstrip("L").lstrip("0x") or "0"
+  d3 = hex(d3).rstrip("L").lstrip("0x") or "0"
+  d2 = hex(d2).rstrip("L").lstrip("0x") or "0"
+  d1 = hex(d1).rstrip("L").lstrip("0x") or "0"
+  
+  eth_add_str = 'BB:BB:%s:%s:%s:%s' %(d4,d3,d2,d1)
+  return EthAddr(eth_add_str)  
+  
+
 def generate_new_tag():
-  return new_tags.pop()
+  global new_tag_num
+  id = new_tag_num
+  new_tag_num+=1
+  
+  
+  r4 = id/254
+  d4 = id%254
+
+  r3 = r4/254
+  d3 = r4%254
+
+  r2 = r3/254
+  d2 = r3%254
+
+  r1 = r2/254
+  d1 = r2%254
+  
+  # make in hex
+  d4 = hex(d4).rstrip("L").lstrip("0x") or "0"
+  d3 = hex(d3).rstrip("L").lstrip("0x") or "0"
+  d2 = hex(d2).rstrip("L").lstrip("0x") or "0"
+  d1 = hex(d1).rstrip("L").lstrip("0x") or "0"
+  
+  
+  eth_add_str = '66:66:%s:%s:%s:%s' %(d4,d3,d2,d1)
+  #print id,eth_add_str
+  return EthAddr(eth_add_str)
+  
+
+
 
 
 def get_backup_group_tag(controller,trees,curr_bak_tree_id,u_node,outport,shared_bak_trees,d_node,backup_edge):  
@@ -363,10 +544,12 @@ def get_backup_group_tag(controller,trees,curr_bak_tree_id,u_node,outport,shared
     d_match_type = d_rule.match_tag.type
     if d_match_type == TagType.GROUP_REUSE or d_match_type == TagType.GROUP:
       u_action_tag = Tag(TagType.GROUP, d_rule.match_tag.value)
-      d_match_tag = Tag(d_match_type, d_rule.match_tag.value) 
-      u_rule = u_node.backup_treeid_rule_map[backup_edge][curr_bak_tree_id]
-      if u_rule.match_tag.type != TagType.MCAST_DST_ADDR and u_rule.match_tag.value == d_rule.match_tag.value:
-        u_action_tag.type = TagType.GROUP_REUSE
+      d_match_tag = Tag(d_match_type, d_rule.match_tag.value)
+      u_action_tag.type = TagType.GROUP_REUSE
+      if u_node.backup_treeid_rule_map.has_key(backup_edge) and u_node.backup_treeid_rule_map[backup_edge].has_key(curr_bak_tree_id):
+        u_rule = u_node.backup_treeid_rule_map[backup_edge][curr_bak_tree_id]
+        if u_rule.match_tag.type != TagType.MCAST_DST_ADDR and u_rule.match_tag.value == d_rule.match_tag.value:
+          u_action_tag.type = TagType.GROUP_REUSE
       return u_action_tag,d_match_tag
   
   for tree_id in trees:
@@ -1005,7 +1188,6 @@ def activate_merger_backups(controller,affected_trees,failed_link):
         node = nodes[node_id]
         if node_id in signaled_nodes or node.is_host:
           continue
-        print "DPG debug: node_id = %s,B=%s" %(node_id,backup_tree.id)
 #        backup_flow_entry = node.backup_treeid_rule_map[backup_tree.backup_edge][backup_tree.id]
 #        if backup_flow_entry.is_placeholder: continue
 #        safe_priority = find_safe_flow_priority(controller, node_id)
@@ -1046,6 +1228,8 @@ def garbage_collect_merger_rules(failed_link,affected_trees):
   
   global garbage_collection_total
   garbage_collection_total = len(node_garbage_flows.values())
+  #print 'DPG: garbage collect nodes=%s, flows=%s' %(node_garbage_flows.keys(),node_garbage_flows.values())
+  return len(node_garbage_flows.values())
   #print node_garbage_flows
 
 def generate_all_backup_ofp_rules(controller):
@@ -1173,7 +1357,6 @@ def find_unique_backup_edges(controller):
         backup_set = set()
         backup_set.add(btree)
         backup_map[edge] = backup_set
-        
   return backup_map
          
       
@@ -1199,15 +1382,24 @@ def create_backup_tag_indices(controller):
       create_single_backup_tree_tagging_indices(controller,backup_tree,backup_tree.id,root_node,backup_edge,primary_tree_tagging)   
     
   #log_backup_flow_entries(backup_map)
-def create_merged_backup_tree_flows(controller):
+def create_merged_backup_tree_flows(controller,backup_edges=None,skip_installation=False,compute_lower_bound_only=False):
   """ Merger Algorithm for backup trees """
   
   mark_backup_tree_edges(controller)
   
+  #if compute_lower_bound_only: return
+  
   create_backup_tag_indices(controller)
+  
+  if backup_edges != None:
+    compute_backup_lower_bound(controller,backup_edges)
+  
+  if skip_installation: return
   
   if controller.backup_tree_mode == BackupMode.PROACTIVE:
     create_bid_match_tags(controller)
+  
+  
   
   generate_all_backup_ofp_rules(controller)
   
@@ -1217,8 +1409,82 @@ def create_merged_backup_tree_flows(controller):
   
   backup_map = find_unique_backup_edges(controller)
   log_backup_flow_entries(backup_map)
+  
+def compute_node_lower_bound(node,backup_edge):
+  num_fwding_groups=0
+  
+  relevant_trees = set()
+  for edge in node.out_links:
+    if not edge.backup_trees.has_key(backup_edge):
+      continue
+    trees = edge.backup_trees[backup_edge]
+    relevant_trees = relevant_trees.union(trees)
+  
+  #remove any tree_ids with a placeholder flow entry
+  remove_treeids = set()
+  for treeid in relevant_trees:
+    if node.backup_treeid_rule_map.has_key(backup_edge) and node.backup_treeid_rule_map[backup_edge].has_key(treeid):
+      flow_entry = node.backup_treeid_rule_map[backup_edge][treeid]
+      if flow_entry.is_placeholder: 
+        remove_treeids.add(treeid)
+    else:
+      #print '\t\tDPG: skip'
+      remove_treeids.add(treeid)
+        
+  for id in remove_treeids:
+    relevant_trees.remove(id)
+    
+  if len(relevant_trees) == 0:
+    return 0
+    
+  # populate teh outlink map  
+  tree_id_to_outlinks_map={}
+  for tid in relevant_trees:
+    out_links = set()
+    for edge in node.out_links:
+      if not edge.backup_trees.has_key(backup_edge): continue
+      if tid in edge.backup_trees[backup_edge]:
+        d_node = edge.downstream_node.id
+        out_links.add(d_node)
+    tree_id_to_outlinks_map[tid] = out_links
+  
+  #print 'DPG debug: Node=%s, tree_id_to_outlinks_map=%s' %(node.id,tree_id_to_outlinks_map)
+  processed_tids=set()
+  for tid in relevant_trees:
+    if tid in processed_tids:
+      continue
+    
+    processed_tids.add(tid)
+    #new_group=False
+    unprocessed_tids=set()
+    for tid2 in relevant_trees:
+      if tid2 not in processed_tids:
+        unprocessed_tids.add(tid2)
+    
+    outlinks = tree_id_to_outlinks_map[tid]
+   # print '\t DPG tid key=%s:' %(tid)
+    for other_tid in unprocessed_tids:
+      other_outlinks = tree_id_to_outlinks_map[other_tid]
+      if other_outlinks == outlinks:
+        #print '\t\t DPG match for tid key=%s, with other_tid=%s:' %(tid,other_tid)
+        processed_tids.add(other_tid)
+    num_fwding_groups+=1
+#    print '\t\t DPG finished tid=%s and num_fwding_groups=%s' %(tid,num_fwding_groups)
+  
+  return num_fwding_groups
       
-def create_install_merged_primary_tree_flows(controller):
+def compute_backup_lower_bound(controller,backup_edges):
+  """ Iterate through all nodes and count the number of sets of nodes using the out-links"""
+  msg_cnt=0
+  for node in nodes.values():
+    if node.is_host: continue
+    for backup_edge in backup_edges:
+      lb = compute_node_lower_bound(node,backup_edge)
+      msg_cnt+=lb
+  
+  record_no_mininet_lower_bound_results(controller, backup_edges,msg_cnt)
+  
+def create_install_merged_primary_tree_flows(controller,skip_installation=False):
   """ Merger Algorithm for primary trees """
   
   create_node_edge_objects(controller)
@@ -1227,9 +1493,9 @@ def create_install_merged_primary_tree_flows(controller):
   
   create_tag_indices(controller)
   
-  install_ofp_merge_rules(controller)
-  
-  log.debug("\t\t  INSTALLED MERGED FLOW ENTRIES!!!! ")
+  if not skip_installation:
+    install_ofp_merge_rules(controller)
+    log.debug("\t\t  INSTALLED MERGED FLOW ENTRIES!!!! ")
   
 
 def create_bid_match_tags(controller):
@@ -1374,6 +1640,183 @@ def install_pcount_unicast_flows(controller):
     log.debug("installing primary tree for unicast flow (%s,%s)" %(src_id,dst_id))
     tree.install()
 
+def get_tree_edges(controller):
+  
+  edges=set()
+  for tree in controller.primary_trees:
+    for edge in tree.edges:
+      if is_switch(edge[0]) and is_switch(edge[1]):
+        edges.add(edge)
+  return list(edges)
+
+
+def clear_bak_tree_expt_structs(controller, backup_edges):
+  """ Clear the following: backup tree flow entries, backup_tree ofp rules, BackupTree instance,     self.backup_treeid_rule_map = {}  # backup_edge --> {tree_id --> flow_entry}
+    self.backup_flow_entries = {} # backup_edge --> flow_entries (set)
+    self.backup_tagging_completed = {} # backup_edge --> set(btree_ids)
+    
+    self.preinstalled_backup_ofp_rules = {}   # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are installed
+    self.cached_write_bid_ofp_rules = {}    # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed
+    self.precomputed_backup_ofp_rules = {}    # For Reactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed."""
+  
+  for backup_edge in backup_edges:
+    for ptree in controller.primary_trees:
+      #backup_tree = ptree.backup_trees[backup_edge]
+      if not ptree.backup_trees.has_key(backup_edge):
+        continue
+      backup_tree = ptree.backup_trees[backup_edge]
+      backup_tree.clear_all()
+      del ptree.backup_trees[backup_edge]
+  
+  global garbage_collection_total
+  garbage_collection_total = 0
+
+  global new_tag_num
+  new_tag_num=1
+     
+  if controller.algorithm_mode != Mode.BASELINE:
+    for backup_edge in backup_edges:
+      for node in nodes.values():
+        node.clear_backup_edge_structs(backup_edge)
+      for edge in edges.values():
+        edge.clear_backup_edge_structs(backup_edge) #(u,d) --> Edge 
+
+  global new_tags
+  global backup_tree_ids
+  global tree_default_tags
+  new_tags = copy.deepcopy(new_tags_copy)
+  backup_tree_ids = copy.deepcopy(backup_tree_ids_copy)
+  tree_default_tags = copy.deepcopy(tree_default_tags_copy) 
+
+def clear_pt_structs(controller):
+  controller.primary_trees =[]
+  controller.mcast_groups = {}
+  
+  global garbage_collection_total
+  garbage_collection_total = 0
+
+  global new_tag_num
+  new_tag_num=1
+
+  if controller.algorithm_mode != Mode.BASELINE:
+    for node in nodes.values():
+      node.clear_primary_structs()
+    for edge in edges.values():
+      edge.clear_primary_structs()
+  global new_tags
+  global backup_tree_ids
+  global tree_default_tags
+  new_tags = copy.deepcopy(new_tags_copy)
+  backup_tree_ids = copy.deepcopy(backup_tree_ids_copy)
+  tree_default_tags = copy.deepcopy(tree_default_tags_copy)    
+def clear_all(controller):
+  
+  global nodes
+  nodes = {}
+  global edges
+  edges = {}
+  global garbage_collection_total
+  garbage_collection_total = 0
+  global new_tag_num
+  new_tag_num=1
+  
+  controller.primary_trees =[]
+  controller.mcast_groups = {}
+  controller.flowTables = {} 
+  controller.arpTable = {}
+  controller.adjacency = defaultdict(lambda:None)
+  controller.flow_measure_points={}  # note this really ought to be (nw_src,nw_dst) -> (d_switch_id2, d_switch_id3, .... , u_switch_id)
+  
+  global new_tags
+  global backup_tree_ids
+  global tree_default_tags
+  new_tags = copy.deepcopy(new_tags_copy)
+  backup_tree_ids = copy.deepcopy(backup_tree_ids_copy)
+  tree_default_tags = copy.deepcopy(tree_default_tags_copy)  
+  
+def bak_tree_proactive_expt_single_group(controller,skip_installation=False,compute_lower_bound_only=False):
+  """  (1) generates multicast group
+       (2) compute backup trees for each edge
+       (3) for each backup tree install and compute stats.  then clear backup tree fields
+  
+      NICK: Here is where the primary trees are computed and installed.  Also, we precompute (and potentially pre-install) backup trees here.
+   """
+  clear_pt_structs(controller)
+  generate_multicast_groups(controller) 
+  successful_computation = compute_primary_trees(controller)
+  
+  if not successful_computation:
+    print "\t DPG debug: not able to compute primary tree.  error for some reason."
+    #os._exit(0)
+    return False,False
+
+  if controller.algorithm_mode != Mode.BASELINE:
+    create_install_merged_primary_tree_flows(controller,skip_installation=True)
+    
+  tree_edges = get_tree_edges(controller)
+  log.debug("DPG: BT = %s" %(tree_edges))
+  
+  
+  cnt=0
+  is_last_edge=False
+  for backup_edge in tree_edges:
+    cnt+=1
+    if cnt == len(tree_edges):
+      is_last_edge=True
+    # TODO: may want to check that the out-degree of u > 1.  
+    # TODO: how to handle case where backup tree could not be computed
+    
+    ran_expt = compute_edge_backup_trees(controller, backup_edge,True,is_last_edge,tree_edges,compute_lower_bound_only)  # will also record the results
+    #clear_bak_tree_expt_structs(controller,backup_edge)
+    
+    #if ran_expt:
+    #  num_runs+=1
+  
+  record_no_mininet_proactive_results(controller,tree_edges)
+  clear_bak_tree_expt_structs(controller,tree_edges)
+  return True,True  
+    
+  
+def bak_tree_expt_single_group(controller,skip_installation=False,compute_lower_bound_only=False):
+  """  (1) generates multicast group
+       (2) compute backup trees for each edge
+       (3) for each backup tree install and compute stats.  then clear backup tree fields
+  
+      NICK: Here is where the primary trees are computed and installed.  Also, we precompute (and potentially pre-install) backup trees here.
+   """
+  clear_pt_structs(controller)
+  generate_multicast_groups(controller) 
+
+  successful_computation = compute_primary_trees(controller)
+  
+  if not successful_computation:
+    print "\t DPG debug: not able to compute primary tree.  error for some reason."
+    #os._exit(0)
+    return False,False
+
+  if controller.algorithm_mode != Mode.BASELINE:
+    create_install_merged_primary_tree_flows(controller,skip_installation=True)
+    
+  tree_edges = get_tree_edges(controller)
+  log.debug("DPG: BT = %s" %(tree_edges))
+  num_fail_links=2
+  num_runs=0
+  while num_runs < num_fail_links:
+    
+    #print tree_edges,num_runs,used_edges
+    if len(tree_edges)==0:
+      return True,False
+    
+    backup_edge = random.choice(tree_edges)
+    tree_edges.remove(backup_edge)
+    
+    ran_expt = compute_edge_backup_trees(controller, backup_edge,skip_installation,compute_lower_bound_only)  # will also record the results
+    clear_bak_tree_expt_structs(controller,[backup_edge])
+    
+    if ran_expt:
+      num_runs+=1
+  
+  return True,True
 
 def install_all_trees(controller,backup_tree_expt=False):
   """  (1) Compute and install the primary trees. 
@@ -1382,7 +1825,7 @@ def install_all_trees(controller,backup_tree_expt=False):
   
       NICK: Here is where the primary trees are computed and installed.  Also, we precompute (and potentially pre-install) backup trees here.
    """
-  generate_multicast_groups(controller,backup_tree_expt)  # NICK: currently the mutlicast groups are just read from a file 'mtree_file_str'
+  #generate_multicast_groups(controller,backup_tree_expt)  # NICK: currently the mutlicast groups are just read from a file 'mtree_file_str'
   
   compute_primary_trees(controller)   # NICK: look at this function 
   
@@ -1392,19 +1835,322 @@ def install_all_trees(controller,backup_tree_expt=False):
   else:   # run baseline
     for tree in controller.primary_trees:
       tree.install()
-#      log.info( "============== installed tree = %s" %(tree.mcast_address))
-#      try:
-#        u_switch_id, d_switch_ids = pcount.get_tree_measure_points(tree.root_ip_address,tree.mcast_address,controller)
-#        core.callDelayed(pcount.PCOUNT_CALL_FREQUENCY,pcount.start_pcount_thread,u_switch_id, d_switch_ids,tree.root_ip_address,tree.mcast_address,controller)
-#      except appleseed.AppleseedError:
-#        log.info("found no flow measurement points for flow = (%s,%s) but continuing operation becasue it assumed that no PCount session is wanted for this flow." %(tree.root_ip_address,tree.mcast_address))
-#      
     msg = " ================= Primary Trees Installed ================="
     log.info(msg)
   
   compute_backup_trees(controller)
   
-def compute_edge_backup_trees(controller, backup_edge):
+def remove_host_ids(node_ids):
+  hosts=[]
+  for node_id in node_ids:
+    if not is_switch(node_id):
+      hosts.append(node_id)
+  for host in hosts:
+    node_ids.remove(host)
+  
+  return node_ids
+  
+def calc_no_mn_basic_stats(controller,affected_trees,backup_edge):
+  total_overlap_nodes = 0
+  total_msgs = 0
+  total_unique_edges=0
+  total_garbage=0
+  total_pt_nodes=0
+  total_bt_nodes=0
+  
+  for ptree in affected_trees:
+    btree = ptree.backup_trees[backup_edge]
+    nodes_to_signal = set(btree.nodes_to_signal)
+    nodes_to_signal = remove_host_ids(nodes_to_signal)
+    
+    upstream_bak_nodes = set([link[0] for link in btree.edges]) 
+    upstream_bak_nodes = remove_host_ids(upstream_bak_nodes)
+    overlap_nodes = upstream_bak_nodes - nodes_to_signal
+    
+    total_overlap_nodes+=len(overlap_nodes)
+    total_unique_edges += len(btree.unique_edges())
+    total_msgs += len(nodes_to_signal)
+    total_garbage += ptree.garbage_collect_stale_baseline_flows(backup_edge,btree)
+    
+  
+    total_bt_nodes += len(upstream_bak_nodes) 
+#    pt_nodes = set([link[0] for link in ptree.edges]) 
+#    pt_nodes = remove_host_ids(pt_nodes)
+#    total_pt_nodes+=len(pt_nodes)
+
+
+  avg_bt_size = float(total_bt_nodes/float(len(affected_trees)))
+  
+  total_pt_nodes=0
+  for ptree in controller.primary_trees:
+    pt_nodes = set([link[0] for link in ptree.edges]) 
+    pt_nodes = remove_host_ids(pt_nodes)
+    total_pt_nodes+=len(pt_nodes)
+    
+  avg_pt_size = float(total_pt_nodes/float(len(controller.primary_trees)))
+  
+  edge_num_ptrees=[]
+  ptree_use_sum=0
+  total_num_graph_edges=0
+  for edge_tuple in edges:
+    edge = edges[edge_tuple]
+    if len(edge.trees)>0 and is_switch(edge_tuple[0]) and is_switch(edge_tuple[1]):
+      edge_num_ptrees.append(len(edge.trees))
+      ptree_use_sum+=len(edge.trees)
+    if is_switch(edge_tuple[0]) and is_switch(edge_tuple[1]):
+      total_num_graph_edges+=1
+  
+  total_num_pt_edges = len(edge_num_ptrees)
+  avg_ptree_link_load = float(ptree_use_sum/(float(total_num_pt_edges)))
+
+  
+  #print 'BASIC'
+  #print total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage
+  #print '\t DPG DEBUG: BASIC msgs=%s, all= %s' %(total_msgs,[total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load])
+  return [total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load]
+  #return [avg_pt_size,avg_bt_size,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage]
+
+def calc_no_mn_merger_stats(controller,affected_trees,backup_edge):
+  
+  total_overlap_nodes = 0
+  total_unique_edges=0
+  total_pt_nodes=0
+  total_bt_nodes=0
+  all_nodes_to_signal=set()
+  for ptree in affected_trees:
+    btree = ptree.backup_trees[backup_edge]
+    nodes_to_signal = set(btree.nodes_to_signal)
+    nodes_to_signal = remove_host_ids(nodes_to_signal)
+    for id in nodes_to_signal:  
+      all_nodes_to_signal.add(id)
+    
+    upstream_bak_nodes = set([link[0] for link in btree.edges]) 
+    upstream_bak_nodes = remove_host_ids(upstream_bak_nodes)
+    overlap_nodes = upstream_bak_nodes - nodes_to_signal
+    #print 'All BK nodes=%s, nodes_to_signal = %s, overlap_nodes=%s' %(upstream_bak_nodes,nodes_to_signal,overlap_nodes)
+    
+    total_overlap_nodes+=len(overlap_nodes)
+    total_unique_edges += len(btree.unique_edges())
+    
+    total_bt_nodes += len(upstream_bak_nodes) 
+  
+  avg_bt_size = float(total_bt_nodes/float(len(affected_trees)))
+  
+  total_pt_nodes=0
+  for ptree in controller.primary_trees:
+    pt_nodes = set([link[0] for link in ptree.edges]) 
+    pt_nodes = remove_host_ids(pt_nodes)
+    total_pt_nodes+=len(pt_nodes)
+    
+  avg_pt_size = float(total_pt_nodes/float(len(controller.primary_trees)))
+  
+  total_msgs,num_pt_reuse_rules = calc_num_reactive_merger_msgs(backup_edge,all_nodes_to_signal)
+  total_garbage=garbage_collect_merger_rules(backup_edge, affected_trees)
+  
+  edge_num_ptrees=[]
+  ptree_use_sum=0
+  total_num_graph_edges=0
+  for edge_tuple in edges:
+    edge = edges[edge_tuple]
+    if len(edge.trees)>0 and is_switch(edge_tuple[0]) and is_switch(edge_tuple[1]):
+      edge_num_ptrees.append(len(edge.trees))
+      ptree_use_sum+=len(edge.trees)
+    if is_switch(edge_tuple[0]) and is_switch(edge_tuple[1]):
+      total_num_graph_edges+=1
+  
+  total_num_pt_edges = len(edge_num_ptrees)
+  avg_ptree_link_load = float(ptree_use_sum/(float(total_num_pt_edges)))
+  
+  lower_bound_error=total_msgs - global_lower_bound
+  #print avg_pt_size,avg_bt_size,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load
+  #print '\t DPG DEBUG: Merger Msgs=%s, All= %s \n' %(total_msgs,[total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load,num_pt_reuse_rules,global_lower_bound,lower_bound_error])
+  return [total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load,num_pt_reuse_rules,global_lower_bound,lower_bound_error]
+  
+def calc_num_reactive_merger_msgs(backup_edge,all_nodes_to_signal):
+  
+  total_msgs = 0
+  num_placeholders=0
+  for node in nodes.values():
+    if node.is_host: continue
+    if not node.backup_flow_entries.has_key(backup_edge): continue
+    cnt=0
+    for entry in node.backup_flow_entries[backup_edge]:
+      if entry.is_placeholder: 
+        if node.id in all_nodes_to_signal: 
+          #print 's%s placeholder found' %(node.id)
+          num_placeholders+=1
+        continue
+#      print 's%s merger message and s%s in nodes_to_signal=%s' %(node.id,node.id,(node.id in all_nodes_to_signal))
+      cnt+=1
+    #print 'merger reactive msgs: s%s, num_msg=%s' %(node.id,cnt)
+    total_msgs+=cnt
+  
+  return total_msgs,num_placeholders  
+
+def calc_num_preinstalled_basic_rules(controller,backup_edge,switch_to_preinstall_cnt_map):
+  
+  total_preinstalled=0
+  
+  for ptree in controller.primary_trees:
+    if ptree.backup_trees.has_key(backup_edge):
+      btree = ptree.backup_trees[backup_edge]
+      nodes_to_signal = set(btree.nodes_to_signal)
+      nodes_to_signal = remove_host_ids(nodes_to_signal)
+      
+      total_preinstalled+=len(nodes_to_signal)
+      
+      for node_id in nodes_to_signal:
+        old_cnt = switch_to_preinstall_cnt_map[node_id]
+        switch_to_preinstall_cnt_map[node_id] = old_cnt + 1
+  return switch_to_preinstall_cnt_map,total_preinstalled   
+  
+def calc_num_preinstalled_merger_rules(backup_edge,switch_to_preinstall_cnt_map):
+  
+  total_preinstalled=0
+  for node in nodes.values():
+    if node.is_host: continue
+    if not node.backup_flow_entries.has_key(backup_edge): continue
+    cnt=0
+    for entry in node.backup_flow_entries[backup_edge]:
+      if entry.is_placeholder: 
+        continue
+      cnt+=1
+    total_preinstalled+=cnt
+    old_cnt = switch_to_preinstall_cnt_map[node.id]
+    switch_to_preinstall_cnt_map[node.id] = old_cnt + cnt
+    
+  return switch_to_preinstall_cnt_map,total_preinstalled  
+
+def record_no_mininet_lower_bound_results(controller, backup_edges,lower_bound):
+  num_primary_trees = len(controller.primary_trees)
+  num_backup_trees = 0
+  lower_bound = lower_bound -1  #fixes minor bug
+  for ptree in controller.primary_trees:
+    for backup_edge in backup_edges:
+      if ptree.backup_trees.has_key(backup_edge):
+        num_backup_trees+=1
+  
+  result = [num_primary_trees,num_backup_trees,lower_bound]
+  if controller.backup_tree_mode == BackupMode.PROACTIVE:
+    w = csv.writer(open("ext/results/current/preinstall-lbound-ieee%s.csv" %(backup_expt_num_switches), "a"))
+    w.writerow(result)  
+  else:
+    w = csv.writer(open("ext/results/current/backup-msg-lbound-ieee%s.csv" %(backup_expt_num_switches), "a"))
+    w.writerow(result) 
+  
+  global global_lower_bound
+  global_lower_bound = lower_bound
+  #print '\t DPG debug,  Lower Bound=%s' %(lower_bound)
+    
+    
+def record_no_mininet_proactive_results(controller,backup_edges):
+  """ number of backup trees, mean # preinstalled flows (ignore the unused nodes?), max # preinstallated"""
+  num_primary_trees = len(controller.primary_trees)
+  num_backup_trees = 0
+  for ptree in controller.primary_trees:
+    for backup_edge in backup_edges:
+      if ptree.backup_trees.has_key(backup_edge):
+        num_backup_trees+=1
+  
+  
+  # MERGER RESULTS 
+  switch_to_preinstall_cnt_map={}
+  for switch_id in core.openflow_discovery._dps:
+    switch_to_preinstall_cnt_map[switch_id] = 0
+  
+  total_preinstalled_rules=0
+  for backup_edge in backup_edges:
+    switch_to_preinstall_cnt_map,num_preinstalled = calc_num_preinstalled_merger_rules(backup_edge,switch_to_preinstall_cnt_map)
+    total_preinstalled_rules+=num_preinstalled
+    
+  #print 'DPG debug Merger: switch_to_preinstall_cnt = %s' %(switch_to_preinstall_cnt_map)
+  mean_all = stats.computeMean(switch_to_preinstall_cnt_map.values())
+  sd_all = stats.computeStandDev(switch_to_preinstall_cnt_map.values(),mean_all)
+  
+  num_preinstall_no_zeros=[]
+  for rule_cnt in switch_to_preinstall_cnt_map.values():
+    if rule_cnt>0:
+      num_preinstall_no_zeros.append(rule_cnt)
+  
+  if len(num_preinstall_no_zeros) == 0:
+    return # don't log this case because was an error
+  
+  mean_no_zeros = stats.computeMean(num_preinstall_no_zeros)
+  sd_no_zeros = stats.computeStandDev(num_preinstall_no_zeros,mean_no_zeros)
+  
+  max_rules = max(switch_to_preinstall_cnt_map.values())
+  
+  lower_bound_error = total_preinstalled_rules - global_lower_bound
+  w = csv.writer(open("ext/results/current/preinstall-merger-proactive-ieee%s.csv" %(backup_expt_num_switches), "a"))
+  result = [num_primary_trees,num_backup_trees,total_preinstalled_rules,mean_no_zeros,sd_no_zeros,mean_all,sd_all,max_rules,global_lower_bound,lower_bound_error]
+  #print 'DPG debug: Preinstall Merger Result=%s' %(result)
+  w.writerow(result)  
+  
+  # BASELINE RESULTS
+  b_switch_to_preinstall_cnt_map={}
+  for switch_id in core.openflow_discovery._dps:
+    b_switch_to_preinstall_cnt_map[switch_id] = 0
+  
+  b_total_preinstalled_rules=0
+  for backup_edge in backup_edges:
+    b_switch_to_preinstall_cnt_map,b_num_preinstalled = calc_num_preinstalled_basic_rules(controller,backup_edge,b_switch_to_preinstall_cnt_map)
+    b_total_preinstalled_rules+=b_num_preinstalled
+  
+ # print 'DPG debug Basic: switch_to_preinstall_cnt = %s' %(b_switch_to_preinstall_cnt_map)
+  b_mean_all = stats.computeMean(b_switch_to_preinstall_cnt_map.values())
+  b_sd_all = stats.computeStandDev(b_switch_to_preinstall_cnt_map.values(),b_mean_all)
+  
+  b_num_preinstall_no_zeros=[]
+  for rule_cnt in b_switch_to_preinstall_cnt_map.values():
+    if rule_cnt>0:
+      b_num_preinstall_no_zeros.append(rule_cnt)
+  
+  b_mean_no_zeros = stats.computeMean(b_num_preinstall_no_zeros)
+  b_sd_no_zeros = stats.computeStandDev(b_num_preinstall_no_zeros,b_mean_no_zeros) 
+  
+  b_max_rules = max(b_switch_to_preinstall_cnt_map.values())
+  
+  w = csv.writer(open("ext/results/current/preinstall-basic-proactive-ieee%s.csv" %(backup_expt_num_switches), "a"))
+  #result = [num_primary_trees,num_backup_trees,b_total_preinstalled_rules,b_mean_no_zeros,b_sd_no_zeros,b_mean_all,b_sd_all,b_max_rules]
+  #print 'DPG debug: Preinstall Basic Result=%s' %(result)
+  w.writerow(result)  
+  
+   # stats computed in reactive: 
+   # total_pt_nodes,total_bt_nodes,total_overlap_nodes,total_msgs,total_unique_edges,total_garbage,total_num_graph_edges,total_num_pt_edges,avg_ptree_link_load,num_pt_reuse_rules
+def record_no_mininet_reactive_results(controller,affected_trees,backup_edge):
+  """ output: # primary trees, # affected PTs, total PT nodes, total BT nodes,overlap nodes,# messages, # unique edges,total_garbage, install time"""
+  num_primary_trees = len(controller.primary_trees)
+  num_affected_trees = len(affected_trees)
+  
+  num_overlap_nodes = -1
+  num_msgs = -1
+  num_unique_edges=-1
+  total_garbage=-1
+  
+  expt_stats = [] #[total_pt_nodes,total_bt_nodes,num_overlap_nodes,num_msgs,num_unique_edges,total_garbage]
+  mode_str='basic'
+  if controller.algorithm_mode == Mode.BASELINE:
+    expt_stats = calc_no_mn_basic_stats(controller,affected_trees,backup_edge)
+    mode_str='basic'
+    w = csv.writer(open("ext/results/current/backup-msg-%s-ieee%s.csv" %(mode_str,backup_expt_num_switches), "a"))
+    result = [num_primary_trees,num_affected_trees] + expt_stats
+    w.writerow(result) 
+  elif controller.algorithm_mode == Mode.MERGER:
+    expt_stats = calc_no_mn_merger_stats(controller,affected_trees,backup_edge)
+    mode_str='merger'
+    w = csv.writer(open("ext/results/current/backup-msg-%s-ieee%s.csv" %(mode_str,backup_expt_num_switches), "a"))
+    result = [num_primary_trees,num_affected_trees] + expt_stats
+    w.writerow(result)
+    
+    expt_stats = calc_no_mn_basic_stats(controller,affected_trees,backup_edge)
+    mode_str='basic'
+    w = csv.writer(open("ext/results/current/backup-msg-%s-ieee%s.csv" %(mode_str,backup_expt_num_switches), "a"))
+    result = [num_primary_trees,num_affected_trees] + expt_stats
+    w.writerow(result)
+    
+  #print 'DPG debug: exit after recording results.'
+  #os._exit(0)
+def compute_edge_backup_trees(controller, backup_edge,skip_installation=False,is_final_proactive_call=False,all_backup_edges=None,compute_lower_bound_only=False):
 
   """ 
   Compute backup_trees for each primary tree using the given backup_edge
@@ -1421,17 +2167,35 @@ def compute_edge_backup_trees(controller, backup_edge):
                               #compute_backup_tree(self,adjacency_list,root,terminals,primary_tree_edges,backup_edge):
     root_id = find_node_id(primary_tree.root_ip_address)
     terminal_ids = primary_tree.get_terminal_node_ids()
-    backup_tree_edges = Steiner_Arb.compute_backup_tree(controller.adjacency,root_id,terminal_ids,primary_tree.edges,backup_edge)
-         
+    successful_computation,backup_tree_edges = Steiner_Arb.compute_backup_tree(controller.adjacency,root_id,terminal_ids,primary_tree.edges,backup_edge)
+    
+    global total_bak_iterations
+    total_bak_iterations+=1
+    if not successful_computation or backup_tree_edges == None:
+      global skip_cnt_no_path
+      skip_cnt_no_path+=1
+      if skip_cnt_no_path%10 == 0: print '\t DPG: backup_edge skip_cnt=%s' %(skip_cnt_no_path)
+      return False
+    
+    log.debug("T%s: %s" %(primary_tree.id,primary_tree.edges))
+    log.debug("BT%s: %s" %(primary_tree.id,backup_tree_edges))
     data = {"edges":backup_tree_edges, "mcast_address":primary_tree.mcast_address, "root":primary_tree.root_ip_address, "terminals":primary_tree.terminal_ip_addresses, "adjacency":controller.adjacency, "controller":controller,"primary_tree":primary_tree,"backup_edge":backup_edge}
     backup_tree = BackupTree(**data)
     primary_tree.backup_trees[backup_edge] = backup_tree
     
-    if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE:
+    if controller.algorithm_mode == Mode.BASELINE and controller.backup_tree_mode == BackupMode.PROACTIVE and not skip_installation:
       backup_tree.preinstall_baseline_backups()
-  if controller.algorithm_mode == Mode.MERGER:    
-    create_merged_backup_tree_flows(controller)
+      
+  if controller.algorithm_mode == Mode.MERGER and controller.backup_tree_mode == BackupMode.REACTIVE:    
+    all_backup_edges = [backup_edge]
+    create_merged_backup_tree_flows(controller,all_backup_edges,skip_installation,compute_lower_bound_only)
+  elif controller.algorithm_mode == Mode.MERGER and controller.backup_tree_mode == BackupMode.PROACTIVE and is_final_proactive_call:
+    create_merged_backup_tree_flows(controller,all_backup_edges,skip_installation,compute_lower_bound_only)
+    
+  if skip_installation and controller.backup_tree_mode == BackupMode.REACTIVE:
+    record_no_mininet_reactive_results(controller,relevant_trees,backup_edge)
   
+  return True
 
 def compute_hard_coded_backup_trees(controller):
   """ Short-term: hard-coded backup tree + assume only one backup tree per primary tree"""
@@ -1571,12 +2335,6 @@ def find_affected_primary_trees(primary_trees,failed_link):
   return affected_trees
       
 
-def get_tree_default_tag(id):
-  id_str = "%s" %(id)
-  if id<10:
-    id_str = "0%s" %(id)
-  return EthAddr('AA:AA:AA:AA:AA:%s' %(id_str))
-
 #####################################################################################################
 
 class MulticastTree ():
@@ -1708,7 +2466,14 @@ class MulticastTree ():
     level = 0
     id = find_node_id(self.root_ip_address)
     upstream_ids = [id]
-    node_levels = [] 
+    node_levels = []
+    
+   
+    infinite_loop_flag = int(len(self.controller.adjacency)/float(2))
+    #infinite_loop_flag = backup_expt_num_switches
+#    if infinite_loop_flag < 1:
+#      infinite_loop_flag = len(self.edges) * 2
+    
     while len(upstream_ids)>0:
       node_levels.append(upstream_ids)
       downstream_ids = []
@@ -1717,6 +2482,12 @@ class MulticastTree ():
         downstream_ids = downstream_ids + downstream
       level+=1
       upstream_ids = downstream_ids
+      #print node_levels
+      if level >= infinite_loop_flag:
+        msg = "BT%s infinite loop found when computing node levels. Iterated %s times trying to compute node levels. Tree edges=%s." %(self.id,level,self.edges)
+        log.error("%s. Exiting Program." %(msg))
+        raise appleseed.AppleseedError(msg)
+        
     return node_levels
   
   def is_leaf_node(self,node_id):
@@ -1794,6 +2565,8 @@ class PrimaryTree (MulticastTree):
     global garbage_collection_total
     garbage_collection_total+=len(garbage_collect_nodes)
     
+    return len(garbage_collect_nodes)
+    
   def __str__(self):
     return "Tree %s, %s-->%s" %(self.id,self.mcast_address,self.edges)
   
@@ -1815,9 +2588,23 @@ class BackupTree (MulticastTree):
     self.proactive_activate_msgs = {}  # switch_id --> ofp_msg
     self.set_bid()
     
+  def clear_all(self):
+    self.primary_tree = None
+    self.backup_edge = None
+    self.nodes_to_signal = None
+    self.diverge_nodes = None 
+    self.bid = -1   # backup tree id
+    self.edges = None
+    self.mcast_address = None
+    self.root_ip_address = None
+    self.terminal_ip_addresses = None
+    self.adjacency = None
+    self.controller = None
+    self.default_tag = None
+    
   def set_bid(self):
-    index = self.primary_tree.next_bid * -1  #pull from end of the backup_tree_id list
-    self.bid = backup_tree_ids[index] 
+    #index = self.primary_tree.next_bid * -1  #pull from end of the backup_tree_id list
+    self.bid = generate_next_bid(self.primary_tree.next_bid)
     self.primary_tree.next_bid+=1
     
   def compute_diverge_nodes(self):
@@ -2030,7 +2817,10 @@ class BackupTree (MulticastTree):
       raise appleseed.AppleseedError("No implementation of backup tree activation for MERGER_DEPRACATED mode.")
     else:
       raise appleseed.AppleseedError("No relevant optimization strategy set.  Exiting.")
-    
+   
+  def unique_edges(self):
+    unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
+    return unique_edges 
     
   def __str__(self):
     unique_edges =  [link for link in self.edges if link not in self.primary_tree.edges]
@@ -2049,6 +2839,16 @@ class Edge ():
     
     self.backup_trees = {}      # backup_edge --> set(tree_id2,tree_id2,...)
     self.backup_tags = {}     # backup_edge --> Tag 
+  
+  def clear_primary_structs(self):
+    self.trees = set()
+    self.tags = set()
+      
+  def clear_backup_edge_structs(self,backup_edge):
+    if self.backup_trees.has_key(backup_edge):
+      del self.backup_trees[backup_edge]
+    if self.backup_tags.has_key(backup_edge):
+      del self.backup_tags[backup_edge]
   
   def add_backup_tree(self, tree_id,backup_edge):
     if self.backup_trees.has_key(backup_edge):
@@ -2190,9 +2990,32 @@ class Node ():
     self.cached_write_bid_ofp_rules = {}    # For Proactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed
     self.precomputed_backup_ofp_rules = {}    # For Reactive Mode: backup_edge --> ofp_rules (set).  Rules are not installed.
     
+  def clear_primary_structs(self):
+    self.treeid_rule_map = {}  
+    self.flow_entries = set()
+    self.installed_ofp_rules = set()
     
+  def clear_backup_edge_structs(self,backup_edge):
+    
+    if  self.backup_flow_entries.has_key(backup_edge):
+      del self.backup_flow_entries[backup_edge]
+    
+    if  self.backup_treeid_rule_map.has_key(backup_edge):  
+      del self.backup_treeid_rule_map[backup_edge]
+    
+    if  self.backup_tagging_completed.has_key(backup_edge):  
+      del self.backup_tagging_completed[backup_edge]
+    if  self.preinstalled_backup_ofp_rules.has_key(backup_edge):
+      del self.preinstalled_backup_ofp_rules[backup_edge]
+    if  self.cached_write_bid_ofp_rules.has_key(backup_edge):
+      del self.cached_write_bid_ofp_rules[backup_edge]
+    if  self.precomputed_backup_ofp_rules.has_key(backup_edge):
+      del self.precomputed_backup_ofp_rules[backup_edge]
+  
   def garbage_collect_merge_flows(self,ptree_id,backup_edge,all_affected_primary_trees):
     """ For now just returns the flow so we can compute the stats of # flows to remove"""
+    if not self.treeid_rule_map.has_key(ptree_id):
+      return False,None
     flow_entry = self.treeid_rule_map[ptree_id]
     
     for pt_id in self.treeid_rule_map.keys():
@@ -2490,6 +3313,7 @@ class FlowEntry():
       tag = self.outport_tags[outport]
       
       if tag.type == TagType.GROUP or tag.type == TagType.SINGLE:
+         #print 'DPG debug: s%s, backup_tree=%s, l2 tag value = %s' %(switch_id,backup_tree,tag.value) 
          write_tag_action = of.ofp_action_dl_addr.set_dst(tag.value)
          ofp_rule.actions.append(write_tag_action)
          ofp_rule.actions.append(of.ofp_action_output(port = outport))

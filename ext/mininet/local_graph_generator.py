@@ -1,7 +1,7 @@
 """ Generated graphs with the same degree distribution as the IEEE Bus system graphs """
 
 import sys, os, time, random, copy,csv
-from mininet.topo import Topo
+#from mininet.topo import Topo
 #import algs
 #import stats
 
@@ -62,6 +62,7 @@ class Graph(object):
   def __init__(self):
     self.nodes = []
     self.edges = [] # tuples
+    self.adjacency={}  # (u_id,d_id): port #
         
   ''' return a node object matching the id, if it exists.  otherwise create and return an new Node object'''
   def getNode(self, id):
@@ -159,19 +160,32 @@ class Graph(object):
       
     self.checkGenGraph()
     
-    self.convert_to_mn_format()
+    self.convert_to_adj_list()
+    #self.convert_to_mn_format()
      
     return cnt
-      
-  def convert_to_mn_format(self):
-     
-    if len(self.edges) >0:
-      for e in self.edges:
-        del e
-    for node in self.nodes:
-      node.convert_to_mn_format()
-      self.edges = self.edges + node.edges
   
+  def convert_to_adj_list(self):
+    
+    num_switches = len(self.nodes)
+    for node in self.nodes:
+      port_num = 1
+      for neigh in node.neighbors_:
+        e = (node.id+num_switches,neigh.id+num_switches)
+        self.adjacency[e] = port_num
+        #print '%s -> %s' %(e,port_num)
+        port_num+=1
+      
+      # add the host
+      host_id = node.id 
+
+      e1 = (node.id+num_switches,host_id)
+      self.adjacency[e1] = port_num
+      #print '%s -> %s' %(e1,port_num)
+      e2 = (host_id,node.id+num_switches)
+      self.adjacency[e2] = 1
+      #print '%s -> %s' %(e2,1)
+      
   def getNumEdges(self):
      
     cnt = 0
@@ -204,6 +218,9 @@ class Graph(object):
       
     for node in self.nodes:
         
+      if len(node.neighbors_) == 0: 
+        print "[ERROR] node %s has no neighbor nodes.  Exiting program." % (node.id)
+        os._exit(0)
       # check for self loops
       for neigh in node.neighbors_:
         if node.id == neigh.id:
@@ -321,34 +338,6 @@ class Graph(object):
     return output 
 
 
-class IeeeMininetTopo ( Topo ):
-  def __init__(self):
-    # super
-    super(IeeeMininetTopo, self).__init__()
-
-  def convert_to_mn_graph(self, g):
-    """ 
-    1) Create switches, hosts...attach 
-    2) Add one host to each switch, for ieee14 (h14>s0, h15->s1, etc.)
-    3) Add edges between switches
-    """
-    # create switches and attach a host to the switch
-    # one host per switch
-    add_factor = len(g.nodes)
-    for n in g.nodes:
-      n = n.id
-      s_id = n + add_factor
-      self.addSwitch('s%d' % s_id)
-      self.addHost('h%d' % n)
-      self.addLink("s%d" % s_id, "h%d" % n)
-    
-    # link switches acording to topology
-    for (n1, n2) in g.edges:
-      #n1 = n1 + 1
-      #n2 = n2 + 1
-      self.addLink("s%d" % (n1+add_factor), "s%d" % (n2+add_factor))
-
-
 
 #def gen_mcast_groups(mn_graph,group_size,num_groups=1):
 #  """ mn_graph is IeeeMininetTopo instance"""
@@ -437,8 +426,8 @@ def gen_graph_as_adjacency(graph_txt_file_name):
   graph_txt_file = open(graph_txt_file_name)
   non_mn_graph.parseGraphFile(graph_txt_file)
   numSwaps = non_mn_graph.swapEdges()
-  
-  print non_mn_graph.edges
+  #print non_mn_graph.adjacency
+  return non_mn_graph.adjacency
 
 if __name__ == "__main__":
   graph_file = "ieee-buses/ieee14.txt"
